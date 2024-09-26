@@ -27,8 +27,8 @@ export default function ConfigModal({ open, onClose }: ConfigModalProps) {
   React.useEffect(() => {
     if (open) {
       (async () => {
-        const { default: yaml } = await import('js-yaml');
-        setYamlConfig(yaml.dump(config));
+        const { default: yaml } = await import('yaml');
+        setYamlConfig(yaml.stringify(config));
       })();
     }
   }, [open, config]);

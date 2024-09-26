@@ -1,7 +1,7 @@
 import fs from 'fs';
-import yaml from 'js-yaml';
 import path from 'path';
 import invariant from 'tiny-invariant';
+import { parse } from 'yaml';
 import cliState from './cliState';
 import { importModule } from './esm';
 import logger from './logger';
@@ -109,7 +109,7 @@ export async function loadApiProvider(
     if (providerPath.endsWith('.json')) {
       fileContent = JSON.parse(fs.readFileSync(modulePath, 'utf8')) as ProviderOptions;
     } else {
-      fileContent = yaml.load(fs.readFileSync(modulePath, 'utf8')) as ProviderOptions;
+      fileContent = parse(fs.readFileSync(modulePath, 'utf8')) as ProviderOptions;
     }
     invariant(fileContent, `Provider config ${filePath} is undefined`);
     invariant(fileContent.id, `Provider config ${filePath} must have an id`);

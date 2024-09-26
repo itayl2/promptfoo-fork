@@ -12,7 +12,6 @@ import Stack from '@mui/material/Stack';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { stringify as csvStringify } from 'csv-stringify/browser/esm/sync';
-import yaml from 'js-yaml';
 import { useStore as useResultsViewStore } from './store';
 
 function DownloadMenu() {
@@ -35,7 +34,7 @@ function DownloadMenu() {
   };
 
   const downloadConfig = () => {
-    const configData = yaml.dump(config);
+    const configData = stringify(config);
     const mimeType = 'text/yaml;charset=utf-8';
     const blob = new Blob([configData], { type: mimeType });
     openDownloadDialog(blob, 'promptfooconfig.yaml');
@@ -125,7 +124,7 @@ function DownloadMenu() {
         metadata: row.test.metadata,
       }));
 
-    const yamlContent = yaml.dump(humanEvalCases);
+    const yamlContent = stringify(humanEvalCases);
     const blob = new Blob([yamlContent], { type: 'application/x-yaml' });
     openDownloadDialog(blob, `${evalId}-human-eval-cases.yaml`);
     handleClose();

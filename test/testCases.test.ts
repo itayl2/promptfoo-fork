@@ -1,7 +1,7 @@
 import dedent from 'dedent';
 import * as fs from 'fs';
 import { globSync } from 'glob';
-import yaml from 'js-yaml';
+import YAML from 'yaml';
 import { testCaseFromCsvRow } from '../src/csv';
 import { fetchCsvFromGoogleSheet } from '../src/googleSheets';
 import { loadApiProvider } from '../src/providers';
@@ -159,7 +159,7 @@ describe('readTest', () => {
       vars: { var1: 'value1', var2: 'value2' },
       assert: [{ type: 'equals', value: 'value1' }],
     };
-    jest.mocked(fs.readFileSync).mockReturnValueOnce(yaml.dump(testContent));
+    jest.mocked(fs.readFileSync).mockReturnValueOnce(YAML.stringify(testContent));
 
     const result = await readTest(testPath);
 
@@ -198,8 +198,8 @@ describe('readTest', () => {
     jest.mocked(globSync).mockReturnValueOnce(['vars/vars1.yaml', 'vars/vars2.yaml']);
     jest
       .mocked(fs.readFileSync)
-      .mockReturnValueOnce(yaml.dump(varsContent1))
-      .mockReturnValueOnce(yaml.dump(varsContent2));
+      .mockReturnValueOnce(YAML.stringify(varsContent1))
+      .mockReturnValueOnce(YAML.stringify(varsContent2));
 
     const result = await readTest(input);
 
@@ -380,8 +380,8 @@ describe('readTests', () => {
     ];
     jest
       .mocked(fs.readFileSync)
-      .mockReturnValueOnce(yaml.dump(test1Content))
-      .mockReturnValueOnce(yaml.dump(test2Content));
+      .mockReturnValueOnce(YAML.stringify(test1Content))
+      .mockReturnValueOnce(YAML.stringify(test2Content));
     jest.mocked(globSync).mockImplementation((pathOrGlob) => [pathOrGlob].flat());
 
     const result = await readTests(testsPaths);
@@ -405,8 +405,8 @@ describe('readTests', () => {
     };
     jest
       .mocked(fs.readFileSync)
-      .mockReturnValueOnce(yaml.dump(test1Content))
-      .mockReturnValueOnce(yaml.dump(vars1Content));
+      .mockReturnValueOnce(YAML.stringify(test1Content))
+      .mockReturnValueOnce(YAML.stringify(vars1Content));
     jest.mocked(globSync).mockImplementation((pathOrGlob) => [pathOrGlob].flat());
 
     const result = await readTests(testsPaths);
@@ -421,7 +421,7 @@ describe('readTests', () => {
       description: 'Test 1',
       assert: [{ type: 'equals', value: 'value1' }],
     };
-    jest.mocked(fs.readFileSync).mockReturnValueOnce(yaml.dump(test1Content));
+    jest.mocked(fs.readFileSync).mockReturnValueOnce(YAML.stringify(test1Content));
     jest.mocked(globSync).mockImplementation((pathOrGlob) => [pathOrGlob].flat());
 
     const result = await readTests(testsPaths);

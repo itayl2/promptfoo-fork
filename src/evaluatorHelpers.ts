@@ -1,7 +1,7 @@
 import * as fs from 'fs';
-import yaml from 'js-yaml';
 import * as path from 'path';
 import invariant from 'tiny-invariant';
+import { parse } from 'yaml';
 import cliState from './cliState';
 import { getEnvBool } from './envars';
 import { importModule } from './esm';
@@ -92,9 +92,7 @@ export async function renderPrompt(
         }
         vars[varName] = pythonScriptOutput.output.trim();
       } else if (fileExtension === 'yaml' || fileExtension === 'yml') {
-        vars[varName] = JSON.stringify(
-          yaml.load(fs.readFileSync(filePath, 'utf8')) as string | object,
-        );
+        vars[varName] = JSON.stringify(parse(fs.readFileSync(filePath, 'utf8')) as string | object);
       } else {
         vars[varName] = fs.readFileSync(filePath, 'utf8').trim();
       }

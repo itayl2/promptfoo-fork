@@ -9,10 +9,10 @@ import { useTheme } from '@mui/material';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
-import yaml from 'js-yaml';
 // @ts-expect-error: No types available
 import { highlight, languages } from 'prismjs/components/prism-core';
 import 'prismjs/components/prism-yaml';
+import { parse } from 'yaml';
 import './YamlEditor.css';
 import 'prismjs/themes/prism.css';
 
@@ -54,7 +54,7 @@ const YamlEditorComponent: React.FC = () => {
   const toggleReadOnly = () => {
     if (!isReadOnly) {
       try {
-        const parsed = yaml.load(code, { json: true });
+        const parsed = parse(code, { json: true });
         handleChange(parsed);
       } catch {
         // Invalid YAML, probably mid-edit
@@ -71,7 +71,7 @@ const YamlEditorComponent: React.FC = () => {
         const content = e.target?.result as string;
         setCode(content);
         try {
-          const parsed = yaml.load(content, { json: true });
+          const parsed = parse(content, { json: true });
           handleChange(parsed);
         } catch (error) {
           console.error('Error parsing uploaded YAML:', error);
@@ -93,7 +93,7 @@ const YamlEditorComponent: React.FC = () => {
       tests: testCases,
     };
 
-    setCode(yaml.dump(testSuite));
+    setCode(stringify(testSuite));
   }, [defaultTest, description, env, evaluateOptions, prompts, providers, scenarios, testCases]);
 
   return (

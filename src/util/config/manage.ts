@@ -1,7 +1,7 @@
 import * as fs from 'fs';
-import yaml from 'js-yaml';
 import * as os from 'os';
 import * as path from 'path';
+import { stringify } from 'yaml';
 import { getEnvString } from '../../envars';
 import type { UnifiedConfig } from '../../types';
 import { orderKeys } from '../json';
@@ -30,5 +30,5 @@ export function writePromptfooConfig(config: Partial<UnifiedConfig>, outputPath:
     'tests',
     'scenarios',
   ]);
-  fs.writeFileSync(outputPath, yaml.dump(orderedConfig, { skipInvalid: true }));
+  fs.writeFileSync(outputPath, stringify(orderedConfig));
 }

@@ -9,7 +9,7 @@ import Typography from '@mui/material/Typography';
 import { AggregateAjvError } from '@segment/ajv-human-errors';
 import Layout from '@theme/Layout';
 import Ajv from 'ajv';
-import yaml from 'js-yaml';
+import { parse } from 'yaml';
 
 const DEFAULT_INPUT = `prompts:
   - "Write a tweet about {{topic}}"
@@ -59,7 +59,7 @@ const ConfigValidator = () => {
       if (value.trim().startsWith('{')) {
         parsedConfig = JSON.parse(value);
       } else {
-        parsedConfig = yaml.load(value);
+        parsedConfig = parse(value);
       }
 
       const ajv = new Ajv({

@@ -1,6 +1,6 @@
 import cliProgress from 'cli-progress';
 import * as fs from 'fs';
-import yaml from 'js-yaml';
+import YAML from 'yaml';
 import logger from '../../src/logger';
 import { loadApiProvider } from '../../src/providers';
 import { HARM_PLUGINS, PII_PLUGINS } from '../../src/redteam/constants';
@@ -256,7 +256,7 @@ describe('synthesize', () => {
 });
 
 jest.mock('fs');
-jest.mock('js-yaml');
+jest.mock('yaml');
 
 describe('resolvePluginConfig', () => {
   afterEach(() => {
@@ -279,14 +279,14 @@ describe('resolvePluginConfig', () => {
     const yamlContent = { nested: 'value' };
     jest.spyOn(fs, 'existsSync').mockReturnValue(true);
     jest.spyOn(fs, 'readFileSync').mockReturnValue('yaml content');
-    jest.mocked(yaml.load).mockReturnValue(yamlContent);
+    jest.mocked(YAML.parse).mockReturnValue(yamlContent);
 
     const result = resolvePluginConfig(config);
 
     expect(result).toEqual({ key: yamlContent });
     expect(fs.existsSync).toHaveBeenCalledWith('test.yaml');
     expect(fs.readFileSync).toHaveBeenCalledWith('test.yaml', 'utf8');
-    expect(yaml.load).toHaveBeenCalledWith('yaml content');
+    expect(YAML.parse).toHaveBeenCalledWith('yaml content');
   });
 
   it('should resolve JSON file references', () => {
@@ -338,7 +338,7 @@ describe('resolvePluginConfig', () => {
       .mockReturnValueOnce('yaml content')
       .mockReturnValueOnce(JSON.stringify(jsonContent))
       .mockReturnValueOnce(txtContent);
-    jest.mocked(yaml.load).mockReturnValue(yamlContent);
+    jest.mocked(YAML.parse).mockReturnValue(yamlContent);
 
     const result = resolvePluginConfig(config);
 

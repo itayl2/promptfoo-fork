@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { globSync } from 'glob';
-import yaml from 'js-yaml';
 import * as path from 'path';
+import YAML from 'yaml';
 import cliState from '../src/cliState';
 import { importModule } from '../src/esm';
 import { readTests } from '../src/testCases';
@@ -786,7 +786,7 @@ describe('readConfig', () => {
       providers: ['openai:gpt-4o'],
       prompts: ['Hello, world!'],
     };
-    jest.spyOn(fs, 'readFileSync').mockReturnValue(yaml.dump(mockConfig));
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(YAML.stringify(mockConfig));
     jest.spyOn(path, 'parse').mockReturnValue({ ext: '.yaml' } as any);
 
     const result = await readConfig('config.yaml');

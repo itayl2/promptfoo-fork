@@ -4,10 +4,10 @@ import { parse as parseCsv } from 'csv-parse/sync';
 import dedent from 'dedent';
 import * as fs from 'fs';
 import { globSync } from 'glob';
-import yaml from 'js-yaml';
 import * as path from 'path';
 import { parse as parsePath } from 'path';
 import invariant from 'tiny-invariant';
+import { parse } from 'yaml';
 import { testCaseFromCsvRow } from './csv';
 import { getEnvBool } from './envars';
 import { fetchCsvFromGoogleSheet } from './googleSheets';
@@ -53,7 +53,7 @@ export async function readVarsFiles(
     });
 
     for (const p of paths) {
-      const yamlData = yaml.load(fs.readFileSync(p, 'utf-8'));
+      const yamlData = parse(fs.readFileSync(p, 'utf-8'));
       Object.assign(ret, yamlData);
     }
   }
@@ -90,7 +90,7 @@ export async function readStandaloneTestsFile(
     telemetry.recordAndSendOnce('feature_used', {
       feature: 'yaml tests file',
     });
-    rows = yaml.load(fs.readFileSync(resolvedVarsPath, 'utf-8')) as unknown as any;
+    rows = parse(fs.readFileSync(resolvedVarsPath, 'utf-8')) as unknown as any;
   }
 
   return rows.map((row, idx) => {
@@ -122,7 +122,7 @@ export async function readTest(
   if (typeof test === 'string') {
     const testFilePath = path.resolve(basePath, test);
     const testBasePath = path.dirname(testFilePath);
-    const rawTestCase = yaml.load(fs.readFileSync(testFilePath, 'utf-8')) as TestCaseWithVarsFile;
+    const rawTestCase = parse(fs.readFileSync(testFilePath, 'utf-8')) as TestCaseWithVarsFile;
     testCase = await loadTestWithVars(rawTestCase, testBasePath);
   } else {
     testCase = await loadTestWithVars(test, basePath);
@@ -183,7 +183,7 @@ export async function readTests(
       if (testFile.endsWith('.csv')) {
         testCases = await readStandaloneTestsFile(testFile, basePath);
       } else if (testFile.endsWith('.yaml') || testFile.endsWith('.yml')) {
-        testCases = yaml.load(fs.readFileSync(testFile, 'utf-8')) as TestCase[];
+        testCases = parse(fs.readFileSync(testFile, 'utf-8')) as TestCase[];
         testCases = await _deref(testCases, testFile);
       } else if (testFile.endsWith('.json')) {
         // eslint-disable-next-line @typescript-eslint/no-require-imports

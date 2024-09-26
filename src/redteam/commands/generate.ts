@@ -2,9 +2,9 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import dedent from 'dedent';
 import * as fs from 'fs';
-import yaml from 'js-yaml';
 import path from 'path';
 import invariant from 'tiny-invariant';
+import { parse } from 'yaml';
 import { z } from 'zod';
 import { synthesize } from '..';
 import { disableCache } from '../../cache';
@@ -144,20 +144,20 @@ export async function doGenerateRedteam(options: RedteamCliGenerateOptions) {
 
   if (options.output) {
     const existingYaml = configPath
-      ? (yaml.load(fs.readFileSync(configPath, 'utf8')) as Partial<UnifiedConfig>)
+      ? (parse(fs.readFileSync(configPath, 'utf8')) as Partial<UnifiedConfig>)
       : {};
     const updatedYaml: Partial<UnifiedConfig> = {
       ...existingYaml,
       defaultTest: {
-        ...(existingYaml.defaultTest || {}),
+        ...(existingYaml?.defaultTest || {}),
         metadata: {
-          ...(existingYaml.defaultTest?.metadata || {}),
+          ...(existingYaml?.defaultTest?.metadata || {}),
           purpose,
           entities,
         },
       },
       tests: redteamTests,
-      redteam: { ...(existingYaml.redteam || {}), ...updatedRedteamConfig },
+      redteam: { ...(existingYaml?.redteam || {}), ...updatedRedteamConfig },
     };
     writePromptfooConfig(updatedYaml, options.output);
     printBorder();
@@ -175,17 +175,18 @@ export async function doGenerateRedteam(options: RedteamCliGenerateOptions) {
     );
     printBorder();
   } else if (options.write && configPath) {
-    const existingConfig = yaml.load(fs.readFileSync(configPath, 'utf8')) as Partial<UnifiedConfig>;
+    const existingConfig =
+      parse(fs.readFileSync(configPath, 'utf8')) ?? ({} as Partial<UnifiedConfig>);
     existingConfig.defaultTest = {
-      ...(existingConfig.defaultTest || {}),
+      ...(existingConfig?.defaultTest || {}),
       metadata: {
-        ...(existingConfig.defaultTest?.metadata || {}),
+        ...(existingConfig?.defaultTest?.metadata || {}),
         purpose,
         entities,
       },
     };
-    existingConfig.tests = [...(existingConfig.tests || []), ...redteamTests];
-    existingConfig.redteam = { ...(existingConfig.redteam || {}), ...updatedRedteamConfig };
+    existingConfig.tests = [...(existingConfig?.tests || []), ...redteamTests];
+    existingConfig.redteam = { ...(existingConfig?.redteam || {}), ...updatedRedteamConfig };
     writePromptfooConfig(existingConfig, configPath);
     logger.info(
       `\nWrote ${redteamTests.length} new test cases to ${path.relative(process.cwd(), configPath)}`,

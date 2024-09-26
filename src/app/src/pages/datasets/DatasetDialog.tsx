@@ -14,7 +14,6 @@ import TableRow from '@mui/material/TableRow';
 import TextareaAutosize from '@mui/material/TextareaAutosize';
 import Typography from '@mui/material/Typography';
 import type { TestCasesWithMetadata } from '@promptfoo/types';
-import yaml from 'js-yaml';
 
 interface DatasetDialogProps {
   openDialog: boolean;
@@ -39,7 +38,7 @@ export default function DatasetDialog({ openDialog, handleClose, testCase }: Dat
         </Typography>
         <TextareaAutosize
           readOnly
-          value={testCase && yaml.dump(testCase.testCases)}
+          value={testCase && stringify(testCase.testCases)}
           style={{ width: '100%', padding: '0.75rem' }}
           maxRows={15}
         />

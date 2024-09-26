@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { globSync } from 'glob';
-import yaml from 'js-yaml';
 import path from 'path';
+import YAML from 'yaml';
 import { z } from 'zod';
 import {
   AssertionSchema,
@@ -182,7 +182,7 @@ describe('TestSuiteConfigSchema', () => {
     if (!parentDir.startsWith('redteam-')) {
       it(`should validate ${relativePath}`, async () => {
         const configContent = fs.readFileSync(file, 'utf8');
-        const config = yaml.load(configContent);
+        const config = YAML.parse(configContent);
         const result = TestSuiteConfigSchema.safeParse(config);
         if (!result.success) {
           console.error(`Validation failed for ${file}:`, result.error);

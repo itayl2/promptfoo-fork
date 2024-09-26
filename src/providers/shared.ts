@@ -1,4 +1,4 @@
-import yaml from 'js-yaml';
+import { parse } from 'yaml';
 import { getEnvBool, getEnvInt } from '../envars';
 
 /**
@@ -70,7 +70,7 @@ export function parseChatPrompt<T>(prompt: string, defaultValue: T): T {
   if (trimmedPrompt.startsWith('- role:')) {
     try {
       // Try YAML - some legacy OpenAI prompts are YAML :(
-      return yaml.load(prompt) as T;
+      return parse(prompt) as T;
     } catch (err) {
       throw new Error(`Chat Completion prompt is not a valid YAML string: ${err}\n\n${prompt}`);
     }

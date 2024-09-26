@@ -6,12 +6,12 @@ import { XMLParser } from 'fast-xml-parser';
 import { distance as levenshtein } from 'fastest-levenshtein';
 import fs from 'fs';
 import * as rouge from 'js-rouge';
-import yaml from 'js-yaml';
 import { type Option as sqlParserOption } from 'node-sql-parser';
 import util from 'node:util';
 import path from 'path';
 import Clone from 'rfdc';
 import invariant from 'tiny-invariant';
+import { parse } from 'yaml';
 import { AssertionsResult } from './assertions/AssertionsResult';
 import cliState from './cliState';
 import { getEnvBool, getEnvInt } from './envars';
@@ -352,9 +352,7 @@ export async function runAssertion({
       } else if (filePath.endsWith('.json')) {
         renderedValue = JSON.parse(fs.readFileSync(path.resolve(basePath, filePath), 'utf8'));
       } else if (filePath.endsWith('.yaml') || filePath.endsWith('.yml')) {
-        renderedValue = yaml.load(
-          fs.readFileSync(path.resolve(basePath, filePath), 'utf8'),
-        ) as object;
+        renderedValue = parse(fs.readFileSync(path.resolve(basePath, filePath), 'utf8')) as object;
       } else if (filePath.endsWith('.txt')) {
         // Trim to remove trailing newline
         renderedValue = fs.readFileSync(path.resolve(basePath, filePath), 'utf8').trim();
@@ -409,7 +407,7 @@ export async function runAssertion({
           invariant(schema, 'is-json references a file that does not export a JSON schema');
           validate = ajv.compile(schema as object);
         } else {
-          const scheme = yaml.load(renderedValue) as object;
+          const scheme = parse(renderedValue) as object;
           validate = ajv.compile(scheme);
         }
       } else if (typeof renderedValue === 'object') {
@@ -646,7 +644,7 @@ export async function runAssertion({
             invariant(schema, 'contains-json references a file that does not export a JSON schema');
             validate = ajv.compile(schema as object);
           } else {
-            const scheme = yaml.load(renderedValue) as object;
+            const scheme = parse(renderedValue) as object;
             validate = ajv.compile(scheme);
           }
         } else if (typeof renderedValue === 'object') {
@@ -1515,7 +1513,7 @@ export async function runCompareAssertion(
 
 export async function readAssertions(filePath: string): Promise<Assertion[]> {
   try {
-    const assertions = yaml.load(fs.readFileSync(filePath, 'utf-8')) as Assertion[];
+    const assertions = parse(fs.readFileSync(filePath, 'utf-8')) as Assertion[];
     if (!Array.isArray(assertions) || assertions[0]?.type === undefined) {
       throw new Error('Assertions file must be an array of assertion objects');
     }

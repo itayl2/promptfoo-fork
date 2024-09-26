@@ -6,11 +6,11 @@ import { desc, eq, like, and, sql } from 'drizzle-orm';
 import deepEqual from 'fast-deep-equal';
 import * as fs from 'fs';
 import { globSync } from 'glob';
-import yaml from 'js-yaml';
 import NodeCache from 'node-cache';
 import nunjucks from 'nunjucks';
 import * as path from 'path';
 import invariant from 'tiny-invariant';
+import YAML from 'yaml';
 import cliState from '../cliState';
 import { TERMINAL_MAX_WIDTH } from '../constants';
 import { getDbSignalPath, getDb } from '../database';
@@ -138,7 +138,7 @@ export async function writeOutput(
       JSON.stringify({ evalId, results, config, shareableUrl } satisfies OutputFile, null, 2),
     );
   } else if (outputExtension === 'yaml' || outputExtension === 'yml' || outputExtension === 'txt') {
-    fs.writeFileSync(outputPath, yaml.dump({ results, config, shareableUrl } as OutputFile));
+    fs.writeFileSync(outputPath, YAML.stringify({ results, config, shareableUrl } as OutputFile));
   } else if (outputExtension === 'html') {
     const template = fs.readFileSync(`${getDirectory()}/tableOutput.html`, 'utf-8');
     const table = [
@@ -399,7 +399,7 @@ export function listPreviousResults_fileSystem(): { fileName: string; descriptio
     if (!resultsCache[fileName]) {
       try {
         const fileContents = fs.readFileSync(path.join(directory, fileName), 'utf8');
-        const data = yaml.load(fileContents) as ResultsFile;
+        const data = YAML.parse(fileContents) as ResultsFile;
         resultsCache[fileName] = data;
       } catch (error) {
         logger.warn(`Failed to read results from ${fileName}:\n${error}`);
@@ -1209,7 +1209,7 @@ export function maybeLoadFromExternalFile(filePath: string | object | Function |
     return JSON.parse(contents);
   }
   if (finalPath.endsWith('.yaml') || finalPath.endsWith('.yml')) {
-    return yaml.load(contents);
+    return YAML.parse(contents);
   }
   return contents;
 }

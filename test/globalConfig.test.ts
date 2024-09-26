@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import yaml from 'js-yaml';
+import YAML from 'yaml';
 import { readGlobalConfig, writeGlobalConfig } from '../src/globalConfig/globalConfig';
 
 jest.mock('fs', () => ({
@@ -30,7 +30,7 @@ describe('readCliConfig', () => {
   it('reads from existing config', () => {
     const config = { account: { email: 'test@example.com' } };
     jest.mocked(fs.existsSync).mockReturnValue(true);
-    jest.mocked(fs.readFileSync).mockReturnValue(yaml.dump(config));
+    jest.mocked(fs.readFileSync).mockReturnValue(YAML.stringify(config));
 
     const result = readGlobalConfig();
 

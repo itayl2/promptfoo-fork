@@ -3,8 +3,8 @@ import chalk from 'chalk';
 import cliProgress from 'cli-progress';
 import Table from 'cli-table3';
 import * as fs from 'fs';
-import yaml from 'js-yaml';
 import invariant from 'tiny-invariant';
+import { parse } from 'yaml';
 import logger from '../logger';
 import type { TestCaseWithPlugin } from '../types';
 import { maybeLoadFromExternalFile } from '../util';
@@ -93,7 +93,7 @@ export function resolvePluginConfig(config: Record<string, any> | undefined): Re
       }
 
       if (filePath.endsWith('.yaml')) {
-        config[key] = yaml.load(fs.readFileSync(filePath, 'utf8'));
+        config[key] = parse(fs.readFileSync(filePath, 'utf8'));
       } else if (filePath.endsWith('.json')) {
         config[key] = JSON.parse(fs.readFileSync(filePath, 'utf8'));
       } else {

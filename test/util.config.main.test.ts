@@ -1,7 +1,7 @@
 import * as fs from 'fs';
-import yaml from 'js-yaml';
 import * as os from 'os';
 import * as path from 'path';
+import YAML from 'yaml';
 import type { UnifiedConfig } from '../src/types';
 import {
   getConfigDirectoryPath,
@@ -11,7 +11,7 @@ import {
 
 jest.mock('os');
 jest.mock('fs');
-jest.mock('js-yaml');
+jest.mock('yaml');
 
 describe('config', () => {
   const mockHomedir = '/mock/home';
@@ -73,7 +73,7 @@ describe('writePromptfooConfig', () => {
   it('writes a basic config to the specified path', () => {
     const mockConfig: Partial<UnifiedConfig> = { description: 'Test config' };
     const mockYaml = 'description: Test config\n';
-    jest.mocked(yaml.dump).mockReturnValue(mockYaml);
+    jest.mocked(YAML.stringify).mockReturnValue(mockYaml);
 
     writePromptfooConfig(mockConfig, mockOutputPath);
 
@@ -91,7 +91,7 @@ describe('writePromptfooConfig', () => {
 
     writePromptfooConfig(mockConfig, mockOutputPath);
 
-    const dumpCall = jest.mocked(yaml.dump).mock.calls[0][0];
+    const dumpCall = jest.mocked(YAML.stringify).mock.calls[0][0];
     const keys = Object.keys(dumpCall);
     expect(keys).toEqual(['description', 'prompts', 'providers', 'defaultTest', 'tests']);
   });
@@ -101,7 +101,7 @@ describe('writePromptfooConfig', () => {
 
     writePromptfooConfig(mockConfig, mockOutputPath);
 
-    expect(yaml.dump).toHaveBeenCalledWith(expect.anything(), { skipInvalid: true });
+    expect(YAML.stringify).toHaveBeenCalledWith(expect.anything());
   });
 
   it('handles empty config', () => {
@@ -110,7 +110,7 @@ describe('writePromptfooConfig', () => {
     writePromptfooConfig(mockConfig, mockOutputPath);
 
     expect(fs.writeFileSync).toHaveBeenCalledWith(mockOutputPath, undefined);
-    expect(yaml.dump).toHaveBeenCalledWith({}, { skipInvalid: true });
+    expect(YAML.stringify).toHaveBeenCalledWith({});
   });
 
   it('preserves all fields of the UnifiedConfig', () => {
@@ -128,7 +128,7 @@ describe('writePromptfooConfig', () => {
 
     writePromptfooConfig(mockConfig, mockOutputPath);
 
-    const dumpCall = jest.mocked(yaml.dump).mock.calls[0][0];
+    const dumpCall = jest.mocked(YAML.stringify).mock.calls[0][0];
     expect(dumpCall).toEqual(expect.objectContaining(mockConfig));
   });
 
@@ -141,7 +141,7 @@ describe('writePromptfooConfig', () => {
 
     writePromptfooConfig(mockConfig, mockOutputPath);
 
-    const dumpCall = jest.mocked(yaml.dump).mock.calls[0][0];
+    const dumpCall = jest.mocked(YAML.stringify).mock.calls[0][0];
     expect(dumpCall).toHaveProperty('description', 'Config with undefined');
     expect(dumpCall).toHaveProperty('providers', ['provider1']);
     expect(dumpCall).not.toHaveProperty('prompts');

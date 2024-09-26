@@ -86,25 +86,25 @@ describe('doGenerateRedteam', () => {
     );
     expect(writePromptfooConfig).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompts: [{ raw: 'Test prompt' }],
-        providers: [],
-        tests: [
-          {
-            vars: { input: 'Test input' },
-            assert: [{ type: 'equals', value: 'Test output' }],
-            metadata: { pluginId: 'redteam' },
-          },
-        ],
-        redteam: expect.objectContaining({
-          purpose: 'Test purpose',
-          entities: ['Test entity'],
-        }),
         defaultTest: {
           metadata: {
-            purpose: 'Test purpose',
             entities: ['Test entity'],
+            purpose: 'Test purpose',
           },
         },
+        redteam: expect.objectContaining({
+          entities: ['Test entity'],
+          plugins: expect.any(Array),
+          purpose: 'Test purpose',
+          strategies: [],
+        }),
+        tests: [
+          {
+            assert: [{ type: 'equals', value: 'Test output' }],
+            metadata: { pluginId: 'redteam' },
+            vars: { input: 'Test input' },
+          },
+        ],
       }),
       'output.yaml',
     );

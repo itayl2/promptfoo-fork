@@ -1,9 +1,9 @@
 import $RefParser from '@apidevtools/json-schema-ref-parser';
 import * as fs from 'fs';
 import { globSync } from 'glob';
-import yaml from 'js-yaml';
 import * as path from 'path';
 import invariant from 'tiny-invariant';
+import { parse } from 'yaml';
 import { readAssertions } from '../../assertions';
 import { validateAssertions } from '../../assertions/validateAssertions';
 import cliState from '../../cliState';
@@ -147,7 +147,7 @@ export async function readConfig(configPath: string): Promise<UnifiedConfig> {
   };
   const ext = path.parse(configPath).ext;
   if (ext === '.json' || ext === '.yaml' || ext === '.yml') {
-    const rawConfig = yaml.load(fs.readFileSync(configPath, 'utf-8')) as UnifiedConfig;
+    const rawConfig = parse(fs.readFileSync(configPath, 'utf-8')) as UnifiedConfig;
     ret = await dereferenceConfig(rawConfig || {});
   } else if (isJavascriptFile(configPath)) {
     ret = (await importModule(configPath)) as UnifiedConfig;
