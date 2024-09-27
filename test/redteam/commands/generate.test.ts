@@ -7,7 +7,7 @@ import * as configModule from '../../../src/util/config/load';
 import { writePromptfooConfig } from '../../../src/util/config/manage';
 
 jest.mock('fs');
-jest.mock('yaml');
+jest.mock('js-yaml');
 jest.mock('../../../src/redteam');
 jest.mock('../../../src/util/config/manage');
 jest.mock('../../../src/logger');
