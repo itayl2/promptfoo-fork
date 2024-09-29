@@ -23,12 +23,12 @@ interface ProviderConfig {
 /**
  * Calculates the cost of an API call based on the model and token usage.
  *
- * @param {string} modelName The name of the model used.
- * @param {ProviderConfig} config The provider configuration.
- * @param {number | undefined} promptTokens The number of tokens in the prompt.
- * @param {number | undefined} completionTokens The number of tokens in the completion.
- * @param {ProviderModel[]} models An array of available models with their costs.
- * @returns {number | undefined} The calculated cost, or undefined if it can't be calculated.
+ * @param modelName - The name of the model used.
+ * @param config - The provider configuration.
+ * @param promptTokens - The number of tokens in the prompt.
+ * @param completionTokens - The number of tokens in the completion.
+ * @param models - An array of available models with their costs.
+ * @returns The calculated cost, or undefined if it can't be calculated.
  */
 export function calculateCost(
   modelName: string,
@@ -59,11 +59,10 @@ export function calculateCost(
 /**
  * Parses a chat prompt string into a structured format.
  *
- * @template T The expected return type of the parsed prompt.
- * @param {string} prompt The input prompt string to parse.
- * @param {T} defaultValue The default value to return if parsing fails.
- * @returns {T} The parsed prompt or the default value.
- * @throws {Error} If the prompt is invalid YAML or JSON (when required).
+ * @param prompt - The input prompt string to parse.
+ * @param defaultValue - The default value to return if parsing fails.
+ * @returns The parsed prompt or the default value.
+ * @throws Error if the prompt is invalid YAML or JSON (when required).
  */
 export function parseChatPrompt<T>(prompt: string, defaultValue: T): T {
   const trimmedPrompt = prompt.trim();
@@ -95,8 +94,8 @@ export function parseChatPrompt<T>(prompt: string, defaultValue: T): T {
 /**
  * Converts a string to title case.
  *
- * @param {string} str The input string to convert.
- * @returns {string} The input string converted to title case.
+ * @param str - The input string to convert.
+ * @returns The input string converted to title case.
  */
 export function toTitleCase(str: string) {
   return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());

@@ -131,8 +131,8 @@ type EnvVarKey = keyof EnvVars;
 
 /**
  * Get an environment variable.
- * @param key The name of the environment variable.
- * @param defaultValue Optional default value if the environment variable is not set.
+ * @param key - The name of the environment variable.
+ * @param defaultValue - Optional default value if the environment variable is not set.
  * @returns The value of the environment variable, or the default value if provided.
  */
 export function getEnvString(key: EnvVarKey): string | undefined;
@@ -147,8 +147,8 @@ export function getEnvString(key: EnvVarKey, defaultValue?: string): string | un
 
 /**
  * Get a boolean environment variable.
- * @param key The name of the environment variable.
- * @param defaultValue Optional default value if the environment variable is not set.
+ * @param key - The name of the environment variable.
+ * @param defaultValue - Optional default value if the environment variable is not set.
  * @returns The boolean value of the environment variable, or the default value if provided.
  */
 export function getEnvBool(key: EnvVarKey, defaultValue?: boolean): boolean {
@@ -164,8 +164,8 @@ export function getEnvBool(key: EnvVarKey, defaultValue?: boolean): boolean {
 
 /**
  * Get an integer environment variable.
- * @param key The name of the environment variable.
- * @param defaultValue Optional default value if the environment variable is not set.
+ * @param key - The name of the environment variable.
+ * @param defaultValue - Optional default value if the environment variable is not set.
  * @returns The integer value of the environment variable, or the default value if provided.
  */
 export function getEnvInt(key: EnvVarKey): number | undefined;
@@ -186,8 +186,8 @@ export function getEnvInt(key: EnvVarKey, defaultValue?: number): number | undef
 
 /**
  * Get a float environment variable.
- * @param key The name of the environment variable.
- * @param defaultValue Optional default value if the environment variable is not set.
+ * @param key - The name of the environment variable.
+ * @param defaultValue - Optional default value if the environment variable is not set.
  * @returns The float value of the environment variable, or the default value if provided.
  */
 export function getEnvFloat(key: EnvVarKey): number | undefined;

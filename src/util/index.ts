@@ -921,11 +921,9 @@ export async function deleteEval(evalId: string) {
     }
   });
 }
-
 /**
  * Deletes all evaluations and related records with foreign keys from the database.
- * @async
- * @returns {Promise<void>}
+ * @returns Promise<void>
  */
 export async function deleteAllEvals(): Promise<void> {
   const db = getDb();

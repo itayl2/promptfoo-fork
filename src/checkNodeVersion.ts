@@ -5,7 +5,7 @@ import logger from './logger';
 
 /**
  * Function to get the required Node version from package.json
- * @returns {string} The required Node version specified in package.json
+ * @returns The required Node version specified in package.json
  */
 const getRequiredNodeVersion = (): string => {
   const packageJsonPath = path.resolve(__dirname, '../package.json');

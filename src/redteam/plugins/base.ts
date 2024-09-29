@@ -107,8 +107,8 @@ export abstract class PluginBase {
   }
 
   /**
-   * Converts an array of { prompt: string } objects into an array of test cases.
-   * @param prompts - An array of { prompt: string } objects.
+   * Converts an array of {@link prompt: string} objects into an array of test cases.
+   * @param prompts - An array of {@link prompt: string} objects.
    * @returns An array of test cases.
    */
   protected promptsToTestCases(prompts: { prompt: string }[]): TestCase[] {
@@ -124,7 +124,7 @@ export abstract class PluginBase {
    * Parses the LLM response of generated prompts into an array of objects.
    *
    * @param generatedPrompts - The LLM response of generated prompts.
-   * @returns An array of { prompt: string } objects. Each of these objects represents a test case.
+   * @returns An array of {@link prompt: string} objects. Each of these objects represents a test case.
    */
   protected parseGeneratedPrompts(generatedPrompts: string): { prompt: string }[] {
     const parsePrompt = (line: string): string | null => {

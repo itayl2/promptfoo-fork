@@ -315,10 +315,10 @@ export async function matchesSimilarity(
 
 /**
  *
- * @param expected Expected classification. If undefined, matches any classification.
- * @param output Text to classify.
- * @param threshold Value between 0 and 1. If the expected classification is undefined, the threshold is the minimum score for any classification. If the expected classification is defined, the threshold is the minimum score for that classification.
- * @param grading
+ * @param expected - Expected classification. If undefined, matches any classification.
+ * @param output - Text to classify.
+ * @param threshold - Value between 0 and 1. If the expected classification is undefined, the threshold is the minimum score for any classification. If the expected classification is defined, the threshold is the minimum score for that classification.
+ * @param grading - Configuration for grading the classification.
  * @returns Pass if the output matches the classification with a score greater than or equal to the threshold.
  */
 export async function matchesClassification(

@@ -60,7 +60,7 @@ describe('Basic tests', () => {
 
   /**
    * Catches an incorrect output from node-sql-parser package
-   * The parser cannot identify the syntax error: misuse of backticks (`)
+   * The parser cannot identify the syntax error: misuse of backticks (` `)
    */
   // it('should fail when the output string is an invalid SQL statement', () => {
   //   const renderedValue = undefined;

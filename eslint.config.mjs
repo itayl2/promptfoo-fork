@@ -2,6 +2,7 @@
 import reactHooks from 'eslint-plugin-react-hooks';
 import eslint from '@eslint/js';
 import jest from 'eslint-plugin-jest';
+import tsdoc from 'eslint-plugin-tsdoc';
 import eslintPluginUnicorn from 'eslint-plugin-unicorn';
 import unusedImports from 'eslint-plugin-unused-imports';
 import globals from 'globals';
@@ -40,6 +41,7 @@ export default [
       'react-hooks': reactHooks,
       'unused-imports': unusedImports,
       unicorn: eslintPluginUnicorn,
+      tsdoc,
     },
     rules: {
       '@typescript-eslint/no-unsafe-function-type': 0,
@@ -70,6 +72,7 @@ export default [
       'unicorn/no-negated-condition': 'error',
       'unicorn/prefer-number-properties': 'error',
       'unused-imports/no-unused-imports': 'error',
+      'tsdoc/syntax': 'warn',
     },
   },
   {
@@ -79,6 +82,7 @@ export default [
       '@typescript-eslint/no-var-requires': 0,
       '@typescript-eslint/no-unused-vars': 0,
       '@typescript-eslint/no-require-imports': 0,
+      'tsdoc/syntax': 0,
     },
   },
 ];
