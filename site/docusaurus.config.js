@@ -247,6 +247,7 @@ const config = {
               },
               {
                 label: 'Minimizing Hallucinations',
+                // NOTE: typo is left for SEO
                 to: '/docs/guides/prevent-llm-hallucations',
               },
               {
