@@ -5,6 +5,25 @@ const { themes } = require('prism-react-renderer');
 const lightCodeTheme = themes.github;
 const darkCodeTheme = themes.duotoneDark;
 
+const path = require('path');
+
+// Define your array of objects
+const dynamicPages = [
+  {
+    id: 'page1',
+    title: 'Dynamic Page 1',
+    content: 'This is the content for page 1',
+    features: ['Feature 1', 'Feature 2', 'Feature 3'],
+  },
+  {
+    id: 'page2',
+    title: 'Dynamic Page 2',
+    content: 'This is the content for page 2',
+    features: ['Feature A', 'Feature B', 'Feature C'],
+  },
+  // Add more objects as needed
+];
+
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: 'promptfoo',
@@ -303,7 +322,30 @@ const config = {
         indexName: 'promptfoo',
       },
     }),
-  plugins: [require.resolve('docusaurus-plugin-image-zoom')],
+  plugins: [
+    require.resolve('docusaurus-plugin-image-zoom'),
+    function (context, options) {
+      return {
+        name: 'dynamic-pages-plugin',
+        async contentLoaded({ content, actions }) {
+          const { createData, addRoute } = actions;
+          for (const page of dynamicPages) {
+            const pageContent = await createData(`${page.id}.json`, JSON.stringify(page));
+            addRoute({
+              path: `/dynamic/${page.id}`,
+              component: '@site/src/components/DynamicPage',
+              modules: {
+                pageContent,
+              },
+              exact: true,
+            });
+          }
+        },
+      };
+    },
+  ],
+
+  // ... rest of the config ...
 };
 
 module.exports = config;
