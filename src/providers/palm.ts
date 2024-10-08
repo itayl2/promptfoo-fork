@@ -71,7 +71,12 @@ class PalmGenericProvider implements ApiProvider {
 }
 
 export class PalmChatProvider extends PalmGenericProvider {
-  static CHAT_MODELS = ['chat-bison-001', 'gemini-pro', 'gemini-pro-vision'];
+  static CHAT_MODELS = [
+    'chat-bison-001',
+    'gemini-pro',
+    'gemini-pro-vision',
+    'gemini-1.5-pro',
+  ];
 
   constructor(
     modelName: string,
@@ -97,7 +102,15 @@ export class PalmChatProvider extends PalmGenericProvider {
 
     // https://developers.generativeai.google/tutorials/curl_quickstart
     // https://ai.google.dev/api/rest/v1beta/models/generateMessage
-    const messages = parseChatPrompt(prompt, [{ content: prompt }]);
+    const messages = parseChatPrompt(prompt, [
+      {
+        fileData: {
+          mimeType: 'video/mp4',
+          fileUri: 'https://generativelanguage.googleapis.com/v1beta/files/aevyiwsr0gr6',
+        },
+      },
+      { text: prompt },
+    ]);
     const body = {
       prompt: { messages },
       temperature: this.config.temperature,
@@ -152,7 +165,21 @@ export class PalmChatProvider extends PalmGenericProvider {
   }
 
   async callGemini(prompt: string): Promise<ProviderResponse> {
-    const contents = parseChatPrompt(prompt, [{ parts: [{ text: prompt }] }]);
+    const whatWeNeed = [
+      {
+        parts: [
+          {
+            fileData: {
+              mimeType: 'video/mp4',
+              fileUri: 'https://generativelanguage.googleapis.com/v1beta/files/aevyiwsr0gr6',
+            },
+          },
+          { text: prompt }
+        ]
+      },
+    ];
+    // const contents = parseChatPrompt(prompt, [{ parts: [{ text: prompt }] }]);
+    const contents = parseChatPrompt(prompt, whatWeNeed);
     const body = {
       contents,
       generationConfig: {
