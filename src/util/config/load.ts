@@ -144,6 +144,7 @@ export async function dereferenceConfig(rawConfig: UnifiedConfig): Promise<Unifi
 }
 
 export async function readConfig(configPath: string): Promise<UnifiedConfig> {
+  setupEnv(undefined);
   let ret: UnifiedConfig & {
     targets?: UnifiedConfig['providers'];
     plugins?: RedteamPluginObject[];
