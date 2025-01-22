@@ -12,6 +12,7 @@ import type {
 } from '../types/providers';
 import { PromptSchema } from './prompts';
 import { NunjucksFilterMapSchema, TokenUsageSchema } from './shared';
+import { LLMFileSchema } from '../types/motion';
 
 // Note: sync with types/providers.ts
 export const ProviderEnvOverridesSchema = z.object({
@@ -103,6 +104,7 @@ const CallApiFunctionSchema = z
     z.string().describe('prompt'),
     CallApiContextParamsSchema.optional(),
     CallApiOptionsParamsSchema.optional(),
+    LLMFileSchema.optional(),
   )
   .returns(z.promise(z.custom<ProviderResponse>()))
   .and(z.object({ label: z.string().optional() }));

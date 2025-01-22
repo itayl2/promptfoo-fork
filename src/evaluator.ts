@@ -179,7 +179,11 @@ class Evaluator {
     // Overwrite vars with any saved register values
     Object.assign(vars, this.registers);
     // Render the prompt
-    const renderedPrompt = await renderPrompt(prompt, vars, filters, provider);
+    const renderedPromptObj = { value: await renderPrompt(prompt, vars, filters, provider) };
+    await runExtensionHook(this.testSuite.extensions, 'afterPromptRender', {
+      test, prompt, renderedPromptObj,
+    });
+    const renderedPrompt = renderedPromptObj.value;
     let renderedJson = undefined;
     try {
       renderedJson = JSON.parse(renderedPrompt);
@@ -233,6 +237,7 @@ class Evaluator {
           {
             includeLogProbs: test.assert?.some((a) => a.type === 'perplexity'),
           },
+          test.llmFile,
         );
       }
       const endTime = Date.now();
@@ -649,7 +654,7 @@ class Evaluator {
       }
 
       await runExtensionHook(testSuite.extensions, 'beforeEach', {
-        test: evalStep.test,
+        test: evalStep.test, prompt: evalStep.prompt,
       });
 
       const row = await this.runEval(evalStep);

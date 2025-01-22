@@ -21,3 +21,4 @@ __pycache__
 # examples related
 examples/**/package-lock.json
 examples/redteam-dalle/images
+/fileDb.json

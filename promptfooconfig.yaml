@@ -1,0 +1,51 @@
+extensions:
+  - file://BASE_PATH/geminiFileUploadInJs.mjs:geminiUploadExtension
+  - file://BASE_PATH/geminiFileUploadInJs.mjs:testsRepeat
+  - file://BASE_PATH/geminiFileUploadInJs.mjs:replaceCurlyBrackets
+  - file://BASE_PATH/geminiFileUploadInJs.mjs:returnCurlyBrackets
+  - file://BASE_PATH/geminiFileUploadInJs.mjs:metricsHandling
+  - file://BASE_PATH/geminiFileUploadInJs.mjs:addVars
+
+prompts:
+  - BASE_PATH/motion/prompts/prompt_one.txt
+providers:
+  - id: google:gemini-1.5-flash
+    config:
+      temperature: 1.0
+defaultTest:
+  vars:
+    repeatCount: 2
+    lists:
+      formats:
+        - name: 'Before and After'
+          description: 'a before state and an after state is conveyed in the ad. This can be a before and after using the product, for example.'
+        - name: 'Discount or Offer'
+          description: 'some kind of discount or special offer that doesn’t always apply is present in the ad.'
+        - name: Montage
+          description: 'this label applies if there are video clips that don’t necessarily include the brand or product, but show an aspirational lifestyle or convey a vibe that the ad is trying to get across'
+        - name: Showcase
+          description: 'the product or brand is demonstrated or showcased in action'
+        - name: 'Social proof'
+          description: 'a reference is made to the quantity or positivity of reviews, to prove the brand or products’ trustworthiness through social proof'
+        - name: Testimonial
+          description: 'usually when the audio includes someone speaking about their experiences using the brand or product'
+        - name: UGC
+          description: 'this label applies when the ad has a homey, low-production feel to it, or seems to have been filmed by an actual customer rather than by the brand in for example a studio. This label will usually not apply if the ad appears to be coming from the brand itself communicating to the viewer.'
+        - name: Influencer
+          description: 'if someone who is likely an influencer or has a social media audience or following, is shown in the ad.'
+        - name: Educational
+          description: 'applies whenever the ad’s visuals or messaging suggest that it is teaching something about the brand or product.'
+        - name: Unboxing
+          description: 'product packaging is shown and the process of unboxing is featured.'
+        - name: Urgency
+          description: 'some mention of limited time to take advantage of a deal or availability is mentioned in some way.'
+
+  assert:
+    - type: javascript
+      value: file://BASE_PATH/motion/customAssert/accuracy.js
+      config:
+        falseNegativeThreshold: 0.0
+        falsePositiveThreshold: 0
+        truePositiveThreshold: 100.0
+
+tests: https://docs.google.com/spreadsheets/d/1gkkkVUhj1JN66kiUtKYtj1bn4SbgOKpjYjo1v1K2s_Q/edit?usp=sharing

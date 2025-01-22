@@ -21,6 +21,7 @@ import type { EnvOverrides } from './env';
 import type { Prompt, PromptFunction } from './prompts';
 import type { ApiProvider, ProviderOptions, ProviderResponse } from './providers';
 import type { NunjucksFilterMap, TokenUsage } from './shared';
+import { LLMFileSchema } from './motion';
 
 export * from './prompts';
 export * from './providers';
@@ -624,6 +625,8 @@ export type Scenario = z.infer<typeof ScenarioSchema>;
 // Same as a TestCase, except the `vars` object has been flattened into its final form.
 export const AtomicTestCaseSchema = TestCaseSchema.extend({
   vars: z.record(z.union([z.string(), z.object({})])).optional(),
+  fileUrl: z.array(z.string()).optional(),
+  llmFile: LLMFileSchema.optional(),
 }).strict();
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
