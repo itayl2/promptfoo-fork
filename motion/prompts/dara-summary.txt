@@ -1,0 +1,212 @@
+
+I want a creative strategist in-depth analysis and classification for the provided social media ads creative. Support your analysis by looking at the creative insights, metrics and performance summary.
+
+Identify and classify the creative elements that matter in an advertising creative. Include all the elements listed below, and add anything else that you can be relevant. If an element of this list is not relevant or applicable for a given creative, just state so by making it empty array or null element
+
+- Format:
+   - Statics**:** Describe the format of static imagery
+   - Videos, Carousels, GIFs**:** Specify if these are included or not
+- Messaging
+   - User Journey: Describe the target stage(s) of the user journey and key elements of the messaging
+   - Desire Messaging: Highlight the messaging focus areas (e.g., inclusivity, simplicity) and note any absent themes (e.g., romance, power, family, intelligence).
+   - Strategic Messaging: Highlight the messaging focus areas (e.g., inclusivity, simplicity) and note any absent themes (e.g., romance, power, family, intelligence).
+   - Numbers: Note the inclusion of statistics, social proof, or numerical claims
+- Imagery
+   - Hacks: Describe visual techniques used, such as lighting, design, or visual motifs like grids
+   - Setting: Describe the setting (e.g., neutral, specific background, etc.)
+   - Editing: Detail design choices, such as fonts, pacing, and overall aesthetic
+   - Production: Comment on the production quality, including image quality, lighting, and texture presentation
+- Talent
+   - Creator / Influencer: Specify if creators or influencers are featured
+   - Demographics (Race, Age, Gender): Discuss representation and inclusivity
+   - Celebrity: State if celebrities are involved in the ad
+   - AI / Animations: Note if AI elements or animations are included
+
+Remember to:
+
+- Support and elaborate on your findings using evidence from creative insights, metrics, performance summary and your own expert knowledge as creative strategist
+- Focus on:- Where the eye goes- What has more screen time- What is repeated- Trigger words in the creative that are repeated- Messaging / human desires
+
+Remember to think about principles of the user journey:
+
+**1. Unaware**
+
+**User Journey:**
+
+• Users are unaware/unconcerned with a specific problem and are not looking for solutions.
+
+**Market:**
+
+• Most scalable
+
+**Formats:**
+
+• Celebrity content
+
+• Humor
+
+• Educational content
+
+**2. Problem Aware**
+
+**User Journey:**
+
+• Users are aware of their problem and potentially starting to research solutions.
+
+**Market:**
+
+• (Light Green)
+
+**Formats:**
+
+• UGC single testimonials
+
+• Tutorials
+
+• Founder’s story
+
+**3. Solution Aware**
+
+**User Journey:**
+
+• Users are aware of their problem and are actively researching potential solutions.
+
+**Market:**
+
+• (Lighter Green)
+
+**Formats:**
+
+• Us vs Them
+
+• Features / Benefits callout
+
+**4. Product Aware**
+
+**User Journey:**
+
+• Users are aware of their problem, potential solutions, and potentially how you compare in the marketplace.
+
+**Market:**
+
+• (Yellow)
+
+**Formats:**
+
+• Testimonials
+
+• 3 reasons why
+
+**5. Most Aware**
+
+**User Journey:**
+
+• Users are familiar with your product, brand positioning, and how you stack up against the competition.
+
+**Market:**
+
+• Most likely to convert
+
+**Formats:**
+
+• Offers
+
+Important:
+
+- Return your analysis report in json format. A list of json objects, each object being one analysis
+- To reference an ad, use the slug rather than the id.
+- The json must match the structure provided by the zod schema.
+
+For context, this is the zod schema to comply to when creating the json:
+
+```typescript
+import { z } from "zod";
+
+export const CreativeClassificationSchema = z.object({
+  slug: z.string().describe("Unique creative slug"),
+  format: z
+    .object({
+      statics: z.array(z.string()).describe("Details about any static imagery"),
+      videosCarouselsGIFs: z
+        .array(z.string())
+        .describe("Details about videos, carousels, GIFs if present"),
+    })
+    .describe("Creative format details"),
+  messaging: z
+    .object({
+      userJourney: z
+        .string()
+        .optional()
+        .describe("Which stage of user journey the ad targets"),
+      desireMessaging: z
+        .array(z.string())
+        .describe("Messaging focus on desire-related themes"),
+      strategicMessaging: z
+        .array(z.string())
+        .describe("Strategic messaging focus (e.g. simplicity, inclusivity)"),
+      numbers: z
+        .array(z.string())
+        .describe("Any numeric or social-proof claims used"),
+    })
+    .describe("Key messaging within the creative"),
+  imagery: z
+    .object({
+      hacks: z
+        .array(z.string())
+        .describe("Visual or design techniques (e.g. lighting, grids, motifs)"),
+      setting: z
+        .array(z.string())
+        .describe("Environmental or background setting notes"),
+      editing: z
+        .array(z.string())
+        .describe("Design/typography/pacing/aesthetic choices"),
+      production: z
+        .array(z.string())
+        .describe("Production quality, lighting, texture presentation"),
+    })
+    .describe("Imagery specifics"),
+  talent: z
+    .object({
+      creatorInfluencer: z
+        .array(z.string())
+        .describe("Names or notes about creators/influencers if featured"),
+      demographics: z
+        .array(z.string())
+        .describe("Representation, diversity, or inclusivity notes"),
+      celebrity: z.array(z.string()).describe("If any celebrity is involved"),
+      aiAnimations: z
+        .array(z.string())
+        .describe("Any AI/animation usage if relevant"),
+    })
+    .describe("Talent details within the ad"),
+  otherRelevantElements: z
+    .array(z.string())
+    .describe("Catch-all for additional creative elements not in other fields"),
+  performanceSummary: z
+    .object({
+      highlights: z
+        .string()
+        .describe("Performance highlights: spend, ROAS, any major results"),
+      metricsAnalysis: z
+        .string()
+        .describe("Analysis of key metrics like CTR, cost per IC, etc."),
+      spendTrendAnalysis: z
+        .string()
+        .describe("Week-over-week changes or overall spend trends"),
+      overallSummary: z.string().describe("Broader performance conclusion"),
+    })
+    .describe(
+      "Summary of how the ad performed, referencing metrics and insights"
+    ),
+});
+
+export type CreativeClassification = z.infer<
+  typeof CreativeClassificationSchema
+>;
+```
+
+For context, this is the creatives summary:
+{{ summary }}
+
+For context, this is the creative performance summary:
+{{ performanceStatsSummary }}

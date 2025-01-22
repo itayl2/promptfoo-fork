@@ -1,0 +1,73 @@
+
+I want to an analysis of the social media ads creatives reports that are codenamed kilo and lima. I want to know what are the next steps for each creative:
+
+- Is there something to improve? elaborate regardless if yes or no
+- Is there something to scale? elaborate regardless if yes or no
+- Is there something to test? elaborate regardless if yes or no
+- Maybe it's best to totally pivot, and do something else all together?
+- Any relevant suggestions?
+- Suggestions to trigger other creative strategist missions as follow-up?
+
+Be careful to:
+
+- Return your next steps report in json format. The json should be an array, containing a json object for each analyzed creatives
+- To reference a creative, use the slug rather than the id.
+- The json objects of the array should comply to the provided zod schema
+
+For context, this is the zod schema to comply to:
+
+```typescript
+import { z } from "zod";
+
+/**
+ * Schema for validating next steps report for each creative.
+ */
+export const CreativeNextStepsSchema = z.object({
+  slug: z
+    .string()
+    .describe("The reference slug for the creative, e.g., 'alpha', 'beta'."),
+  improvements: z
+    .array(z.string())
+    .describe(
+      "List of suggestions or insights on what to improve for this creative."
+    ),
+  scale: z
+    .array(z.string())
+    .describe(
+      "List of recommendations on how or whether to scale the creative."
+    ),
+  test: z
+    .array(z.string())
+    .describe(
+      "List of testing ideas or experiments to run for further optimization."
+    ),
+  pivot: z
+    .array(z.string())
+    .describe(
+      "List of reasons/ways to pivot if incremental improvements don't work."
+    ),
+  relevantSuggestions: z
+    .array(z.string())
+    .describe(
+      "Additional relevant suggestions or best practices for the creative."
+    ),
+  followUpMissions: z
+    .array(z.string())
+    .describe(
+      "Potential follow-up missions or campaigns that a creative strategist might deploy next."
+    ),
+});
+```
+
+For context, this is the creative summary:
+{{ mainSummary }}
+
+For context, this is the creative performance summary:
+{{ STORED_OUTPUT_MAIN_performanceStatsSummary }}
+
+For context, this is the creative classification:
+{{ STORED_OUTPUT_MAIN_creativeChecklist }}
+
+For context, this is the creative report:
+{{ creativeReport }}
+

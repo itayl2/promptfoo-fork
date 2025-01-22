@@ -1,0 +1,131 @@
+I want a creative strategist analysis for the provided social media ads creative. Support your analysis by looking at the creative insights and metrics.
+
+Follow this flow:
+
+Summarize highlights about this creative's performance
+
+Get important metrics for this creative, consider:
+
+
+- Relevant to client (look at goal metrics)
+- Outliers for this creative (difference vs. average)
+- Changing over time (compare to time periods)
+
+Check for changes in spend over time: is ad starting to get fatigued?
+
+
+- Creative fatigue is a bigger concern when creative has run for a long time & spend is above threshold.
+- Include likelihood of creative fatigue in prompt for analysis
+
+Summarize
+
+
+- How much of a winner/loser is it compared against top performers for the client?
+- How has this creative performed relative to other creatives, and over time?
+- What are some of the outlier metrics vs. other creatives?
+- How are the metrics changing over time?
+- Is there creative fatigue?
+
+Remember to:
+
+
+- Support and elaborate on your findings using evidence from creative insights, metrics, or any other analytical knowledge
+
+Important:
+
+
+- Return your analysis report in json format. A list of json objects, each object being one analysis
+- To reference an ad, use the slug rather than the id.
+- The json must be a list of objects that match the structure provided by the zod schema.
+
+
+For context, this is the zod schema to conform to:
+
+```typescript
+import { z } from "zod";
+
+export const CreativePerformanceSummarySchema = z.object({
+  slug: z.string().describe("Unique identifier slug for the ad creative"),
+  performanceHighlights: z
+    .object({
+      text: z
+        .string()
+        .describe("Short summary of the creative's performance highlights"),
+    })
+    .describe("Overview of key performance points"),
+  metricsAnalysis: z
+    .object({
+      relevantToClientGoal: z
+        .string()
+        .describe("How the metrics align with or differ from client goals"),
+      outliers: z
+        .string()
+        .optional()
+        .describe("Notable anomalies or outliers in performance metrics"),
+      timeComparison: z
+        .string()
+        .optional()
+        .describe(
+          "Insights on how metrics changed over different time periods"
+        ),
+    })
+    .describe("Core analysis of performance metrics"),
+  spendTrendAnalysis: z
+    .object({
+      trendText: z
+        .string()
+        .describe("Narrative about the current spend trend and direction"),
+      isFatigued: z
+        .boolean()
+        .describe(
+          "Indicates if the creative is likely experiencing fatigue or not"
+        ),
+    })
+    .describe("Spend analysis and fatigue check"),
+  overallSummary: z
+    .object({
+      winnerLoserStatus: z
+        .string()
+        .describe(
+          "Indicates if the creative is a winner or loser compared to others"
+        ),
+      relativePerformance: z
+        .string()
+        .describe("Comparison with other creatives in the account"),
+      notableOutliers: z
+        .array(z.string())
+        .optional()
+        .describe("List of metrics or observations that deviate from the norm"),
+      timeMetricChanges: z
+        .string()
+        .optional()
+        .describe("How the creative's metrics evolved over time"),
+      fatigueAssessment: z
+        .string()
+        .describe(
+          "Additional commentary on whether the creative shows signs of fatigue"
+        ),
+    })
+    .describe(
+      "Final summary of the creative's performance and any concluding insights"
+    ),
+});
+```
+
+For context, this is the summary of the creative:
+{{ summary }}
+
+For context, this is the creative performance stats:
+Scaling/Holding/Declining/New: {{ spendState }}
+Launch Date: {{ launchDate }}
+Spend: {{ spend }}
+ROAS: {{ roas }}
+Click to purchase: {{ unique_click_to_purchase_ratio }}
+CTR: {{ ctr }}
+CPM: {{ cpm }}
+Capture-Attention Score: {{ motion_capture_attention }}
+Hold-Attention Score: {{ motion_hold_attention }}
+Bring-to-Site Score: {{ motion_bring_to_site }}
+Drive-Conversions Score: {{ motion_drive_conversions }}
+
+

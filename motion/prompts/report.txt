@@ -1,0 +1,203 @@
+
+I want to have an in-depth creative strategist analysis about the social media ad creative identified by the id MAIN.
+
+Using the provided data from creatives insights, performance summaries and classifications, get all creatives that might have some common elements with the chosen creative.
+
+Go through every strong emerging pattern in the chosen creative, and make a table of creative IDs and how that element shows up in that creative. Associate the creative IDs with a ranking (based on top/poor performer ads)Rank based on weight:
+
+- Number of creatives that execution is present in
+- Iteration type
+- Impact within the creative
+
+Be sure to watch these criteria for weighting:
+
+- Presence in multiple creatives over time (this is the commonality)
+- Each iteration has a weight potential (always weigh messaging higher vs. format, imagery higher vs. production value, secondary format higher vs. primary format)
+- Its impact within the creative (big, time spent on screen, etc.)
+
+Analyze and summarize the insights about what creative elements (and specific executions) are most successful
+
+Be careful to:
+
+- Return your analysis report in json format.
+- To reference an ad, use the slug rather than the id.
+- The json must match the structure provided by the zod schema.
+
+For context, this is the zod schema to comply to when creating the json:
+
+```typescript
+export const AnalysisReportSchema = z.object({
+  analysisReport: z.object({
+    chosenCreative: z.object({
+      slug: z
+        .string()
+        .describe("The slug of the chosen creative we’re analyzing."),
+      keyObservations: z
+        .array(z.string())
+        .describe(
+          "Key points about the creative’s visual, messaging, and strategy."
+        ),
+      overallPerformanceSummary: z.object({
+        roas: z.number().describe("Return on ad spend metric."),
+        spend: z.number().describe("Total spend of the creative."),
+        costPerIC: z.number().describe("Cost per initiate checkout."),
+        ctr: z.number().describe("Click-through rate."),
+        status: z.string().describe("Current active/inactive status."),
+        age: z.string().describe("Approximate age or launch timeframe."),
+        keyPerformanceNotes: z
+          .array(z.string())
+          .describe(
+            "Relevant highlights about performance, spend, or funnel friction."
+          ),
+      }),
+      uniqueOrHighImpactElements: z
+        .array(
+          z.object({
+            elementName: z
+              .string()
+              .describe("Name or short descriptor of the creative element."),
+            impactWithinCreative: z
+              .string()
+              .describe("Role or significance of that element."),
+          })
+        )
+        .describe(
+          "List of specific features or elements that stand out in this creative."
+        ),
+    }),
+    similarCreativesAnalysis: z.object({
+      explanationOfMethodology: z
+        .string()
+        .describe("How we identified shared elements across creatives."),
+      sharedElementsTable: z
+        .array(
+          z.object({
+            element: z
+              .string()
+              .describe("Name or short descriptor of the shared element."),
+            description: z
+              .string()
+              .describe(
+                "Explanation of what the element is and its significance."
+              ),
+            creativesUsingElement: z
+              .array(
+                z.object({
+                  slug: z
+                    .string()
+                    .describe("Slug of a creative using the element."),
+                  rank: z
+                    .string()
+                    .describe(
+                      "Performance tier or classification (e.g., Top Performer)."
+                    ),
+                  notesOnUsage: z
+                    .string()
+                    .describe(
+                      "Short explanation of how the creative leverages this element."
+                    ),
+                })
+              )
+              .describe(
+                "List of creatives that incorporate this element with notes."
+              ),
+            weightFactors: z.object({
+              presenceAcrossCreativesCount: z
+                .number()
+                .describe("How many creatives incorporate this element."),
+              iterationTypeWeight: z
+                .string()
+                .describe(
+                  "Categorization of the element’s iteration type (e.g., messaging, imagery)."
+                ),
+              impactPotential: z
+                .string()
+                .describe(
+                  "Overall significance or potential effect of this element."
+                ),
+            }),
+          })
+        )
+        .describe(
+          "Table capturing the shared elements, which creatives use them, and how."
+        ),
+    }),
+    rankedInsights: z.object({
+      mostCommonHighImpactPatterns: z
+        .array(
+          z.object({
+            patternName: z
+              .string()
+              .describe("Label for a repeated, successful pattern."),
+            whyItWorks: z
+              .string()
+              .describe(
+                "Explanation of why that pattern resonates or performs well."
+              ),
+            notablePerformers: z
+              .array(z.string())
+              .optional()
+              .describe(
+                "List of creative slugs exemplifying strong performance in that pattern."
+              ),
+          })
+        )
+        .describe(
+          "Patterns that frequently appear across top or mid performers."
+        ),
+      lessCommonButHighPotentialPatterns: z
+        .array(
+          z.object({
+            patternName: z
+              .string()
+              .describe("Name of an emerging or less used pattern."),
+            whyItMightExpand: z
+              .string()
+              .describe(
+                "Rationale for why this pattern could be beneficial if scaled."
+              ),
+          })
+        )
+        .describe(
+          "Potentially scalable or underutilized patterns that could become new tests."
+        ),
+      notableMentions: z
+        .array(
+          z.object({
+            pattern: z.string().describe("Pattern worth noting."),
+            comment: z.string().describe("Commentary or observation."),
+          })
+        )
+        .optional(),
+    }),
+    overallStrategicTakeaways: z
+      .array(z.string())
+      .describe(
+        "Key strategic learnings or recommendations derived from the analysis."
+      ),
+  }),
+});
+```
+
+For context, this is the list of creatives summaries:
+# Ad MAIN summary:
+{{ mainSummary }}
+
+# Other Ad #1  summary:
+{{ similarOneSummary }}
+
+
+For context, this is the list of creatives performances summaries:
+# Ad MAIN Performance Summary:
+{{ STORED_OUTPUT_MAIN_performanceStatsSummary }}
+
+# Other Ad #1  Performance Summary:
+{{ STORED_OUTPUT_SIMILAR_ONE_performanceStatsSummary }}
+
+
+For context, this is the list of creatives classifications:
+# Ad MAIN Creative Classification:
+{{ STORED_OUTPUT_MAIN_creativeChecklist }}
+
+# Other Ad #1  Creative Classification:
+{{ STORED_OUTPUT_SIMILAR_ONE_creativeChecklist }}

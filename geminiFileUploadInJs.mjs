@@ -6,6 +6,7 @@ import fs from 'fs';
 import { FileState, GoogleAIFileManager } from '@google/generative-ai/server';
 import axios from 'axios';
 
+const collectedStoredOutputsPrefix = 'STORED_OUTPUT';
 const geminiFileExpiration = 48 * 60 * 60; // 48 hours in seconds
 const safetyMargin = 2 * 60 * 60; // 2 hours
 const fileTtl = (geminiFileExpiration - safetyMargin) * 1000;
@@ -21,6 +22,8 @@ const nunjucksSnR = {
     END: /\]\]/g,
   }
 }
+let mainSlug;
+const storedOutputState = {};
 
 export class FileDb {
   constructor(apiKey) {
@@ -282,15 +285,95 @@ class GeminiApiService {
   }
 }
 
+const getVarName = (itemName, originalVarName) => `${itemName}_${originalVarName}`;
+
 export const addVars = async (hookName, context) => {
   if (hookName !== 'afterEach') {
     return;
   }
 
-  const { test, result } = context;
+  let itemName;
+  try {
+    itemName = context.test.vars.itemName;
+  } catch (error) {
+  }
+
+  // if (itemName) {
+  //   for (const originalVarName of Object.keys(context.test.vars)) {
+  //     const varName = getVarName(itemName, originalVarName);
+  //     storedOutputState[varName] = context.test.vars[originalVarName];
+  //   }
+  // }
+
+  let slug;
+  let output;
+  try {
+    output = context.result.response.output;
+  } catch (error) {
+    return;
+  }
+  if (!output) {
+    return;
+  }
+
+  if (output.indexOf('```json') !== -1) {
+    output = output.replace('```json', '').replace('```', '');
+  }
+  try {
+    slug = JSON.parse(output)[0].slug;
+    console.log(slug);
+  } catch (error) {}
+
+  if (slug !== undefined) {
+    console.log(`currently mainSlug: ${mainSlug}`);
+    context.test.vars.slug = slug;
+    context.result.vars.slug = slug;
+    context.result.testCase.vars.slug = slug;
+    if (context.test.vars.itemName === 'MAIN') {
+      mainSlug = slug;
+    }
+  }
+
+  if (!itemName) {
+    return;
+  }
+
+  let storeOutputAs;
+  try {
+    storeOutputAs = context.test.options.storeOutputAs;
+  } catch (error) {
+    return;
+  }
+  if (!storeOutputAs) {
+    return;
+  }
+
+  const varName = `${collectedStoredOutputsPrefix}_${itemName}_${storeOutputAs}`;
+  storedOutputState[varName] = output;
 }
 
+export const finalCleanup = async (hookName, context) => {
+  if (hookName !== 'afterAll') {
+    return;
+  }
+
+  for (const test of context.suite.tests) {
+    if (!test.vars) {
+      continue;
+    }
+
+    const keys = Object.keys(test.vars);
+    for (const key of keys) {
+      if (key.startsWith(collectedStoredOutputsPrefix)) {
+        delete test.vars[key];
+      }
+    }
+  }
+}
+
+
 export const metricsHandling = async (hookName, context) => {
+  return;
   if (hookName !== 'afterAll') {
     return;
   }
@@ -335,6 +418,22 @@ export const testsRepeat = async (hookName, context) => {
   }
   context.suite.tests = repeatedTests;
 };
+
+export const addVarsBeforeEach = async (hookName, context) => {
+  if (hookName !== 'beforeEach') {
+    return;
+  }
+
+  console.log('..');
+  if (context.test.vars.useCollectedPreviousOutputs !== 'true') {
+    return;
+  }
+
+  context.test.vars = {
+    ...context.test.vars,
+    ...storedOutputState,
+  }
+}
 
 export const replaceCurlyBrackets = async (hookName, context) => {
   if (hookName !== 'beforeAll') {
