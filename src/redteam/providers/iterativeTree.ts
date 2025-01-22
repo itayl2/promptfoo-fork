@@ -14,7 +14,6 @@
  * @module RedteamIterative
  */
 import type { Environment } from 'nunjucks';
-import invariant from 'tiny-invariant';
 import { renderPrompt } from '../../evaluatorHelpers';
 import logger from '../../logger';
 import { PromptfooChatCompletionProvider } from '../../providers/promptfoo';
@@ -24,13 +23,15 @@ import type {
   CallApiOptionsParams,
   Prompt,
   NunjucksFilterMap,
+  TokenUsage,
 } from '../../types';
-import { extractFirstJsonObject } from '../../util/json';
+import invariant from '../../util/invariant';
+import { extractFirstJsonObject, safeJsonStringify } from '../../util/json';
 import { getNunjucksEngine } from '../../util/templates';
-import { shouldGenerateRemote } from '../util';
+import { shouldGenerateRemote } from '../remoteGeneration';
 import { PENALIZED_PHRASES } from './constants';
 import { ATTACKER_SYSTEM_PROMPT, JUDGE_SYSTEM_PROMPT, ON_TOPIC_SYSTEM_PROMPT } from './prompts';
-import { loadRedteamProvider } from './shared';
+import { getTargetResponse, redteamProviderManager } from './shared';
 
 // Based on: https://arxiv.org/abs/2312.02119
 
@@ -107,6 +108,10 @@ export async function evaluateResponse(
     },
     vars: {},
   });
+  logger.debug(`[IterativeTree] Judge response: ${JSON.stringify(judgeResp)}`);
+  if (judgeResp.error) {
+    throw new Error(`Error from redteam (judge) provider: ${judgeResp.error}`);
+  }
   invariant(typeof judgeResp.output === 'string', 'Expected output to be a string');
   let { rating: score } = extractFirstJsonObject<{ rating: number }>(judgeResp.output);
 
@@ -127,7 +132,7 @@ export async function evaluateResponse(
 export async function getNewPrompt(
   redteamProvider: ApiProvider,
   redteamHistory: { role: 'user' | 'assistant' | 'system'; content: string }[],
-): Promise<{ improvement: string; prompt: string }> {
+): Promise<{ improvement: string; prompt: string; tokenUsage?: TokenUsage }> {
   const redteamBody = JSON.stringify(redteamHistory);
   const redteamResp = await redteamProvider.callApi(redteamBody, {
     prompt: {
@@ -136,11 +141,18 @@ export async function getNewPrompt(
     },
     vars: {},
   });
+  logger.debug(`[IterativeTree] Redteam response: ${JSON.stringify(redteamResp)}`);
+  if (redteamResp.error) {
+    throw new Error(`Error from redteam provider: ${redteamResp.error}`);
+  }
   invariant(
     typeof redteamResp.output === 'string',
     `Expected output to be a string, but got response: ${JSON.stringify(redteamResp)}`,
   );
-  return extractFirstJsonObject<{ improvement: string; prompt: string }>(redteamResp.output);
+  return {
+    ...extractFirstJsonObject<{ improvement: string; prompt: string }>(redteamResp.output),
+    tokenUsage: redteamResp.tokenUsage,
+  };
 }
 
 /**
@@ -154,7 +166,7 @@ export async function checkIfOnTopic(
   redteamProvider: ApiProvider,
   onTopicSystemPrompt: string,
   targetPrompt: string,
-): Promise<boolean> {
+): Promise<{ isOnTopic: boolean; tokenUsage?: TokenUsage }> {
   const isOnTopicBody = JSON.stringify([
     {
       role: 'system',
@@ -172,27 +184,18 @@ export async function checkIfOnTopic(
     },
     vars: {},
   });
+  logger.debug(`[IterativeTree] On-topic response: ${JSON.stringify(isOnTopicResp)}`);
+  if (isOnTopicResp.error) {
+    throw new Error(`Error from redteam (onTopic) provider: ${isOnTopicResp.error}`);
+  }
   invariant(typeof isOnTopicResp.output === 'string', 'Expected output to be a string');
   const { onTopic } = extractFirstJsonObject<{ onTopic: boolean }>(isOnTopicResp.output);
+  logger.debug(`[IterativeTree] Parsed onTopic value: ${JSON.stringify(onTopic)}`);
   invariant(typeof onTopic === 'boolean', 'Expected onTopic to be a boolean');
-  return onTopic;
-}
-
-/**
- * Gets the response from the target provider for a given prompt.
- * @param targetProvider - The API provider to get the response from.
- * @param targetPrompt - The prompt to send to the target provider.
- * @returns A promise that resolves to the target provider's response as a string.
- */
-export async function getTargetResponse(
-  targetProvider: ApiProvider,
-  targetPrompt: string,
-): Promise<string> {
-  const targetResp = await targetProvider.callApi(targetPrompt);
-  invariant(targetResp.output, 'Expected output to be defined');
-  return typeof targetResp.output === 'string'
-    ? targetResp.output
-    : JSON.stringify(targetResp.output);
+  return {
+    isOnTopic: onTopic,
+    tokenUsage: isOnTopicResp.tokenUsage,
+  };
 }
 
 /**
@@ -327,6 +330,8 @@ export async function runRedteamConversation({
   redteamProvider,
   targetProvider,
   injectVar,
+  context,
+  options,
 }: {
   prompt: Prompt;
   filters: NunjucksFilterMap | undefined;
@@ -334,7 +339,13 @@ export async function runRedteamConversation({
   redteamProvider: ApiProvider;
   targetProvider: ApiProvider;
   injectVar: string;
-}): Promise<{ output: string; metadata: { redteamFinalPrompt?: string } }> {
+  context: CallApiContextParams;
+  options: CallApiOptionsParams;
+}): Promise<{
+  output: string;
+  metadata: { redteamFinalPrompt?: string };
+  tokenUsage?: TokenUsage;
+}> {
   const nunjucks = getNunjucksEngine();
   const goal: string = vars[injectVar] as string;
 
@@ -364,6 +375,14 @@ export async function runRedteamConversation({
   let bestScore = 0;
   let noImprovementCount = 0;
 
+  const totalTokenUsage = {
+    total: 0,
+    prompt: 0,
+    completion: 0,
+    numRequests: 0,
+    cached: 0,
+  };
+
   for (let depth = 0; depth < MAX_DEPTH; depth++) {
     logger.debug(
       `[Depth ${depth}] Starting exploration. Nodes to explore: ${currentBestNodes.length}. Max score so far: ${maxScore}`,
@@ -378,10 +397,22 @@ export async function runRedteamConversation({
       );
 
       for (let i = 0; i < branchesForNode; i++) {
-        const { improvement, prompt: newInjectVar } = await getNewPrompt(redteamProvider, [
+        const {
+          improvement,
+          prompt: newInjectVar,
+          tokenUsage: redteamTokenUsage,
+        } = await getNewPrompt(redteamProvider, [
           ...redteamHistory,
           { role: 'assistant', content: node.prompt },
         ]);
+
+        if (redteamTokenUsage) {
+          totalTokenUsage.total += redteamTokenUsage.total || 0;
+          totalTokenUsage.prompt += redteamTokenUsage.prompt || 0;
+          totalTokenUsage.completion += redteamTokenUsage.completion || 0;
+          totalTokenUsage.numRequests += redteamTokenUsage.numRequests ?? 1;
+          totalTokenUsage.cached += redteamTokenUsage.cached || 0;
+        }
 
         attempts++;
         logger.debug(
@@ -398,16 +429,45 @@ export async function runRedteamConversation({
           targetProvider,
         );
 
-        const isOnTopic = await checkIfOnTopic(redteamProvider, onTopicSystemPrompt, targetPrompt);
-        const targetResponse = await getTargetResponse(targetProvider, targetPrompt);
+        const { isOnTopic, tokenUsage: isOnTopicTokenUsage } = await checkIfOnTopic(
+          redteamProvider,
+          onTopicSystemPrompt,
+          targetPrompt,
+        );
+        if (isOnTopicTokenUsage) {
+          totalTokenUsage.total += isOnTopicTokenUsage.total || 0;
+          totalTokenUsage.prompt += isOnTopicTokenUsage.prompt || 0;
+          totalTokenUsage.completion += isOnTopicTokenUsage.completion || 0;
+          totalTokenUsage.cached += isOnTopicTokenUsage.cached || 0;
+          totalTokenUsage.numRequests += isOnTopicTokenUsage.numRequests ?? 1;
+        }
+
+        const targetResponse = await getTargetResponse(
+          targetProvider,
+          targetPrompt,
+          context,
+          options,
+        );
+        if (targetResponse.error) {
+          throw new Error(`[IterativeTree] Target returned an error: ${targetResponse.error}`);
+        }
+        invariant(targetResponse.output, '[IterativeTree] Target did not return an output');
+        if (targetResponse.tokenUsage) {
+          totalTokenUsage.total += targetResponse.tokenUsage.total || 0;
+          totalTokenUsage.prompt += targetResponse.tokenUsage.prompt || 0;
+          totalTokenUsage.completion += targetResponse.tokenUsage.completion || 0;
+          totalTokenUsage.numRequests += targetResponse.tokenUsage.numRequests ?? 1;
+          totalTokenUsage.cached += targetResponse.tokenUsage.cached || 0;
+        }
+
         const containsPenalizedPhrase = PENALIZED_PHRASES.some((phrase) =>
-          targetResponse.toLowerCase().includes(phrase),
+          targetResponse.output.toLowerCase().includes(phrase),
         );
 
         const score = await evaluateResponse(
           redteamProvider,
           judgeSystemPrompt,
-          targetResponse,
+          targetResponse.output,
           containsPenalizedPhrase,
         );
 
@@ -441,10 +501,11 @@ export async function runRedteamConversation({
             `[Depth ${depth}, Attempt ${attempts}] Reached target score (${TARGET_SCORE}). Max score: ${maxScore}. Stopping.`,
           );
           return {
-            output: targetResponse,
+            output: targetResponse.output,
             metadata: {
               redteamFinalPrompt: targetPrompt,
             },
+            tokenUsage: totalTokenUsage,
           };
         }
 
@@ -453,10 +514,11 @@ export async function runRedteamConversation({
             `[Depth ${depth}, Attempt ${attempts}] No improvement for ${MAX_NO_IMPROVEMENT} consecutive iterations. Max score: ${maxScore}. Stopping.`,
           );
           return {
-            output: targetResponse,
+            output: targetResponse.output,
             metadata: {
               redteamFinalPrompt: targetPrompt,
             },
+            tokenUsage: totalTokenUsage,
           };
         }
 
@@ -465,15 +527,22 @@ export async function runRedteamConversation({
             `[Depth ${depth}, Attempt ${attempts}] Reached maximum attempts (${MAX_ATTEMPTS}). Max score: ${maxScore}. Stopping.`,
           );
           return {
-            output: targetResponse,
+            output: targetResponse.output,
             metadata: {
               redteamFinalPrompt: targetPrompt,
             },
+            tokenUsage: totalTokenUsage,
           };
         }
 
         redteamHistory.push(
-          updateRedteamHistory(targetResponse, goal, score, isOnTopic, containsPenalizedPhrase),
+          updateRedteamHistory(
+            targetResponse.output,
+            goal,
+            score,
+            isOnTopic,
+            containsPenalizedPhrase,
+          ),
         );
       }
     }
@@ -494,17 +563,30 @@ export async function runRedteamConversation({
     targetProvider,
   );
 
-  const finalTargetResponse = await getTargetResponse(targetProvider, finalTargetPrompt);
+  const finalTargetResponse = await getTargetResponse(
+    targetProvider,
+    finalTargetPrompt,
+    context,
+    options,
+  );
+  if (finalTargetResponse.tokenUsage) {
+    totalTokenUsage.total += finalTargetResponse.tokenUsage.total || 0;
+    totalTokenUsage.prompt += finalTargetResponse.tokenUsage.prompt || 0;
+    totalTokenUsage.completion += finalTargetResponse.tokenUsage.completion || 0;
+    totalTokenUsage.numRequests += finalTargetResponse.tokenUsage.numRequests ?? 1;
+    totalTokenUsage.cached += finalTargetResponse.tokenUsage.cached || 0;
+  }
 
   logger.debug(
     `Red team conversation complete. Final best score: ${bestScore}, Max score: ${maxScore}, Total attempts: ${attempts}`,
   );
 
   return {
-    output: finalTargetResponse,
+    output: finalTargetResponse.output,
     metadata: {
       redteamFinalPrompt: finalTargetPrompt,
     },
+    tokenUsage: totalTokenUsage,
   };
 }
 
@@ -520,7 +602,7 @@ class RedteamIterativeTreeProvider implements ApiProvider {
    * @param initializeProviders - A export function to initialize the OpenAI providers.
    */
   constructor(readonly config: Record<string, string | object>) {
-    logger.debug(`RedteamIterativeTreeProvider config: ${JSON.stringify(config)}`);
+    logger.debug(`[IterativeTree] Constructor config: ${JSON.stringify(config)}`);
     invariant(typeof config.injectVar === 'string', 'Expected injectVar to be set');
     this.injectVar = config.injectVar;
   }
@@ -545,6 +627,7 @@ class RedteamIterativeTreeProvider implements ApiProvider {
     context?: CallApiContextParams,
     options?: CallApiOptionsParams,
   ): Promise<{ output: string; metadata: { redteamFinalPrompt?: string } }> {
+    logger.debug(`[IterativeTree] callApi context: ${safeJsonStringify(context)}`);
     invariant(context?.originalProvider, 'Expected originalProvider to be set');
     invariant(context?.vars, 'Expected vars to be set');
 
@@ -557,7 +640,7 @@ class RedteamIterativeTreeProvider implements ApiProvider {
         preferSmallModel: false,
       });
     } else {
-      redteamProvider = await loadRedteamProvider({
+      redteamProvider = await redteamProviderManager.getProvider({
         provider: this.config.redteamProvider,
         jsonOnly: true,
       });
@@ -570,6 +653,8 @@ class RedteamIterativeTreeProvider implements ApiProvider {
       redteamProvider,
       targetProvider: context.originalProvider,
       injectVar: this.injectVar,
+      context,
+      options: options || {},
     });
   }
 }

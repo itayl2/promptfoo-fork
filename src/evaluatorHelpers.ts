@@ -1,17 +1,36 @@
 import * as fs from 'fs';
 import yaml from 'js-yaml';
 import * as path from 'path';
-import invariant from 'tiny-invariant';
 import cliState from './cliState';
 import { getEnvBool } from './envars';
 import { importModule } from './esm';
 import logger from './logger';
+import { isPackagePath, loadFromPackage } from './providers/packageParser';
 import { runPython } from './python/pythonUtils';
+import telemetry from './telemetry';
 import type { ApiProvider, NunjucksFilterMap, Prompt } from './types';
 import { renderVarsInObject } from './util';
 import { isJavascriptFile } from './util/file';
+import invariant from './util/invariant';
 import { getNunjucksEngine } from './util/templates';
 import { transform } from './util/transform';
+
+export async function extractTextFromPDF(pdfPath: string): Promise<string> {
+  logger.debug(`Extracting text from PDF: ${pdfPath}`);
+  try {
+    const { default: PDFParser } = await import('pdf-parse');
+    const dataBuffer = fs.readFileSync(pdfPath);
+    const data = await PDFParser(dataBuffer);
+    return data.text.trim();
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("Cannot find module 'pdf-parse'")) {
+      throw new Error('pdf-parse is not installed. Please install it with: npm install pdf-parse');
+    }
+    throw new Error(
+      `Failed to extract text from PDF ${pdfPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
 
 export function resolveVariables(
   variables: Record<string, string | object>,
@@ -84,21 +103,44 @@ export async function renderPrompt(
           varName,
           basePrompt,
           vars,
-        ])) as { output?: string; error?: string };
+        ])) as { output?: any; error?: string };
         if (pythonScriptOutput.error) {
           throw new Error(`Error running Python script ${filePath}: ${pythonScriptOutput.error}`);
         }
         if (!pythonScriptOutput.output) {
           throw new Error(`Python script ${filePath} did not return any output`);
         }
+        invariant(
+          typeof pythonScriptOutput.output === 'string',
+          `pythonScriptOutput.output must be a string. Received: ${typeof pythonScriptOutput.output}`,
+        );
         vars[varName] = pythonScriptOutput.output.trim();
       } else if (fileExtension === 'yaml' || fileExtension === 'yml') {
         vars[varName] = JSON.stringify(
           yaml.load(fs.readFileSync(filePath, 'utf8')) as string | object,
         );
+      } else if (fileExtension === 'pdf') {
+        vars[varName] = await extractTextFromPDF(filePath);
       } else {
         vars[varName] = fs.readFileSync(filePath, 'utf8').trim();
       }
+    } else if (isPackagePath(value)) {
+      const basePath = cliState.basePath || '';
+      const javascriptOutput = (await (
+        await loadFromPackage(value, basePath)
+      )(varName, basePrompt, vars, provider)) as {
+        output?: string;
+        error?: string;
+      };
+      if (javascriptOutput.error) {
+        throw new Error(`Error running ${value}: ${javascriptOutput.error}`);
+      }
+      if (!javascriptOutput.output) {
+        throw new Error(
+          `Expected ${value} to return { output: string } but got ${javascriptOutput}`,
+        );
+      }
+      vars[varName] = javascriptOutput.output;
     }
   }
 
@@ -192,6 +234,11 @@ export async function runExtensionHook(
   if (!extensions || !Array.isArray(extensions) || extensions.length === 0) {
     return;
   }
+
+  telemetry.recordOnce('feature_used', {
+    feature: 'extension_hook',
+  });
+
   for (const extension of extensions) {
     invariant(typeof extension === 'string', 'extension must be a string');
     logger.debug(`Running extension hook ${hookName} with context ${JSON.stringify(context)}`);

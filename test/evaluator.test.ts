@@ -5,8 +5,8 @@ import { runExtensionHook } from '../src/evaluatorHelpers';
 import { runDbMigrations } from '../src/migrate';
 import Eval from '../src/models/eval';
 import type { ApiProvider, TestSuite, Prompt } from '../src/types';
+import { sleep } from '../src/util/time';
 
-jest.mock('node-fetch', () => jest.fn());
 jest.mock('proxy-agent', () => ({
   ProxyAgent: jest.fn().mockImplementation(() => ({})),
 }));
@@ -20,12 +20,16 @@ jest.mock('../src/evaluatorHelpers', () => ({
   ...jest.requireActual('../src/evaluatorHelpers'),
   runExtensionHook: jest.fn(),
 }));
+jest.mock('../src/util/time', () => ({
+  ...jest.requireActual('../src/util/time'),
+  sleep: jest.fn(),
+}));
 
 const mockApiProvider: ApiProvider = {
   id: jest.fn().mockReturnValue('test-provider'),
   callApi: jest.fn().mockResolvedValue({
     output: 'Test output',
-    tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+    tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
   }),
 };
 
@@ -33,7 +37,7 @@ const mockApiProvider2: ApiProvider = {
   id: jest.fn().mockReturnValue('test-provider-2'),
   callApi: jest.fn().mockResolvedValue({
     output: 'Test output',
-    tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+    tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
   }),
 };
 
@@ -41,7 +45,7 @@ const mockGradingApiProviderPasses: ApiProvider = {
   id: jest.fn().mockReturnValue('test-grading-provider'),
   callApi: jest.fn().mockResolvedValue({
     output: JSON.stringify({ pass: true, reason: 'Test grading output' }),
-    tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+    tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
   }),
 };
 
@@ -49,7 +53,7 @@ const mockGradingApiProviderFails: ApiProvider = {
   id: jest.fn().mockReturnValue('test-grading-provider'),
   callApi: jest.fn().mockResolvedValue({
     output: JSON.stringify({ pass: false, reason: 'Grading failed reason' }),
-    tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+    tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
   }),
 };
 
@@ -87,7 +91,13 @@ describe('evaluator', () => {
     expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
     expect(summary.stats.successes).toBe(1);
     expect(summary.stats.failures).toBe(0);
-    expect(summary.stats.tokenUsage).toEqual({ total: 10, prompt: 5, completion: 5, cached: 0 });
+    expect(summary.stats.tokenUsage).toEqual({
+      total: 10,
+      prompt: 5,
+      completion: 5,
+      cached: 0,
+      numRequests: 1,
+    });
     expect(summary.results[0].prompt.raw).toBe('Test prompt value1 value2');
     expect(summary.results[0].prompt.label).toBe('Test prompt {{ var1 }} {{ var2 }}');
     expect(summary.results[0].response?.output).toBe('Test output');
@@ -110,7 +120,13 @@ describe('evaluator', () => {
     expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
     expect(summary.stats.successes).toBe(1);
     expect(summary.stats.failures).toBe(0);
-    expect(summary.stats.tokenUsage).toEqual({ total: 10, prompt: 5, completion: 5, cached: 0 });
+    expect(summary.stats.tokenUsage).toEqual({
+      total: 10,
+      prompt: 5,
+      completion: 5,
+      cached: 0,
+      numRequests: 1,
+    });
     expect(summary.results[0].prompt.raw).toBe('Test prompt 1 < 2 he said "hello world"...');
     expect(summary.results[0].prompt.label).toBe('Test prompt {{ var1 }} {{ var2 }}');
     expect(summary.results[0].response?.output).toBe('Test output');
@@ -133,7 +149,13 @@ describe('evaluator', () => {
     expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
     expect(summary.stats.successes).toBe(1);
     expect(summary.stats.failures).toBe(0);
-    expect(summary.stats.tokenUsage).toEqual({ total: 10, prompt: 5, completion: 5, cached: 0 });
+    expect(summary.stats.tokenUsage).toEqual({
+      total: 10,
+      prompt: 5,
+      completion: 5,
+      cached: 0,
+      numRequests: 1,
+    });
     expect(summary.results[0].prompt.raw).toBe('Test prompt value1 value2');
     expect(summary.results[0].prompt.label).toBe('Test prompt {{ var1.prop1 }} {{ var2 }}');
     expect(summary.results[0].response?.output).toBe('Test output');
@@ -156,7 +178,13 @@ describe('evaluator', () => {
     expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
     expect(summary.stats.successes).toBe(1);
     expect(summary.stats.failures).toBe(0);
-    expect(summary.stats.tokenUsage).toEqual({ total: 10, prompt: 5, completion: 5, cached: 0 });
+    expect(summary.stats.tokenUsage).toEqual({
+      total: 10,
+      prompt: 5,
+      completion: 5,
+      cached: 0,
+      numRequests: 1,
+    });
     expect(summary.results[0].prompt.raw).toBe('Test prompt value1 value2');
     expect(summary.results[0].prompt.label).toBe('test display name');
     expect(summary.results[0].response?.output).toBe('Test output');
@@ -179,7 +207,13 @@ describe('evaluator', () => {
     expect(mockApiProvider.callApi).toHaveBeenCalledTimes(4);
     expect(summary.stats.successes).toBe(4);
     expect(summary.stats.failures).toBe(0);
-    expect(summary.stats.tokenUsage).toEqual({ total: 40, prompt: 20, completion: 20, cached: 0 });
+    expect(summary.stats.tokenUsage).toEqual({
+      total: 40,
+      prompt: 20,
+      completion: 20,
+      cached: 0,
+      numRequests: 4,
+    });
     expect(summary.results[0].prompt.raw).toBe('Test prompt value1 value2');
     expect(summary.results[0].prompt.label).toBe('Test prompt {{ var1 }} {{ var2 }}');
     expect(summary.results[0].response?.output).toBe('Test output');
@@ -202,7 +236,13 @@ describe('evaluator', () => {
     expect(mockApiProvider.callApi).toHaveBeenCalledTimes(2);
     expect(summary.stats.successes).toBe(2);
     expect(summary.stats.failures).toBe(0);
-    expect(summary.stats.tokenUsage).toEqual({ total: 20, prompt: 10, completion: 10, cached: 0 });
+    expect(summary.stats.tokenUsage).toEqual({
+      total: 20,
+      prompt: 10,
+      completion: 10,
+      cached: 0,
+      numRequests: 2,
+    });
     expect(summary.results[0].prompt.raw).toBe('Test prompt value1 value2');
     expect(summary.results[0].prompt.label).toBe('Test prompt {{ var1 }} {{ var2 }}');
     expect(summary.results[0].response?.output).toBe('Test output');
@@ -220,7 +260,13 @@ describe('evaluator', () => {
     expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
     expect(summary.stats.successes).toBe(1);
     expect(summary.stats.failures).toBe(0);
-    expect(summary.stats.tokenUsage).toEqual({ total: 10, prompt: 5, completion: 5, cached: 0 });
+    expect(summary.stats.tokenUsage).toEqual({
+      total: 10,
+      prompt: 5,
+      completion: 5,
+      cached: 0,
+      numRequests: 1,
+    });
     expect(summary.results[0].prompt.raw).toBe('Test prompt');
     expect(summary.results[0].prompt.label).toBe('Test prompt');
     expect(summary.results[0].response?.output).toBe('Test output');
@@ -238,7 +284,13 @@ describe('evaluator', () => {
     expect(mockApiProvider.callApi).toHaveBeenCalledTimes(3);
     expect(summary.stats.successes).toBe(3);
     expect(summary.stats.failures).toBe(0);
-    expect(summary.stats.tokenUsage).toEqual({ total: 30, prompt: 15, completion: 15, cached: 0 });
+    expect(summary.stats.tokenUsage).toEqual({
+      total: 30,
+      prompt: 15,
+      completion: 15,
+      cached: 0,
+      numRequests: 3,
+    });
     expect(summary.results[0].prompt.raw).toBe('Test prompt');
     expect(summary.results[0].prompt.label).toBe('Test prompt');
     expect(summary.results[0].response?.output).toBe('Test output');
@@ -463,7 +515,7 @@ describe('evaluator', () => {
       id: jest.fn().mockReturnValue('test-provider-json'),
       callApi: jest.fn().mockResolvedValue({
         output: '{"output": "testing", "value": 123}',
-        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
       }),
     };
 
@@ -499,7 +551,7 @@ describe('evaluator', () => {
       id: jest.fn().mockReturnValue('test-provider-transform'),
       callApi: jest.fn().mockResolvedValue({
         output: 'Original output',
-        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
       }),
       transform: '`Transformed: ${output}`',
     };
@@ -589,12 +641,71 @@ describe('evaluator', () => {
     expect(mockApiProvider.callApi).toHaveBeenCalledTimes(2);
   });
 
+  it('evaluate with context in vars transform in defaultTest', async () => {
+    const mockApiProvider: ApiProvider = {
+      id: jest.fn().mockReturnValue('test-provider'),
+      callApi: jest.fn().mockResolvedValue({
+        output: 'Test output',
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
+      }),
+    };
+
+    const testSuite: TestSuite = {
+      providers: [mockApiProvider],
+      prompts: [toPrompt('Hello {{ name }}, your age is {{ age }}')],
+      defaultTest: {
+        options: {
+          transformVars: `return {
+              ...vars,
+              // Test that context.uuid is available
+              id: context.uuid,
+              // Test that context.prompt is available but empty
+              hasPrompt: Boolean(context.prompt)
+            }`,
+        },
+      },
+      tests: [
+        {
+          vars: {
+            name: 'Alice',
+            age: 25,
+          },
+        },
+      ],
+    };
+
+    const evalRecord = await Eval.create({}, testSuite.prompts, { id: randomUUID() });
+    await evaluate(testSuite, evalRecord, {});
+    const summary = await evalRecord.toEvaluateSummary();
+
+    expect(summary).toEqual(
+      expect.objectContaining({
+        stats: expect.objectContaining({
+          successes: 1,
+          failures: 0,
+        }),
+        results: expect.arrayContaining([
+          expect.objectContaining({
+            vars: expect.objectContaining({
+              id: expect.stringMatching(
+                /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+              ),
+              hasPrompt: true,
+            }),
+          }),
+        ]),
+      }),
+    );
+
+    expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
+  });
+
   it('evaluate with provider transform and test transform', async () => {
     const mockApiProviderWithTransform: ApiProvider = {
       id: jest.fn().mockReturnValue('test-provider-transform'),
       callApi: jest.fn().mockResolvedValue({
         output: 'Original output',
-        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
       }),
       transform: '`ProviderTransformed: ${output}`',
     };
@@ -665,7 +776,13 @@ describe('evaluator', () => {
     expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
     expect(summary.stats.successes).toBe(1);
     expect(summary.stats.failures).toBe(0);
-    expect(summary.stats.tokenUsage).toEqual({ total: 10, prompt: 5, completion: 5, cached: 0 });
+    expect(summary.stats.tokenUsage).toEqual({
+      total: 10,
+      prompt: 5,
+      completion: 5,
+      cached: 0,
+      numRequests: 1,
+    });
     expect(summary.results[0].prompt.raw).toBe('Test prompt 1');
     expect(summary.results[0].prompt.label).toBe('Test prompt 1');
     expect(summary.results[0].response?.output).toBe('Test output');
@@ -676,7 +793,7 @@ describe('evaluator', () => {
       id: jest.fn().mockReturnValue('test-provider'),
       callApi: jest.fn().mockResolvedValue({
         output: 'Test output',
-        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
       }),
     };
 
@@ -717,11 +834,11 @@ describe('evaluator', () => {
         .fn()
         .mockResolvedValueOnce({
           output: 'Hola mundo',
-          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
         })
         .mockResolvedValueOnce({
           output: 'Bonjour le monde',
-          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
         }),
     };
 
@@ -775,19 +892,19 @@ describe('evaluator', () => {
         .fn()
         .mockResolvedValueOnce({
           output: 'Spanish Hola',
-          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
         })
         .mockResolvedValueOnce({
           output: 'Spanish Bonjour',
-          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
         })
         .mockResolvedValueOnce({
           output: 'French Hola',
-          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
         })
         .mockResolvedValueOnce({
           output: 'French Bonjour',
-          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
         }),
     };
     const testSuite: TestSuite = {
@@ -834,7 +951,7 @@ describe('evaluator', () => {
       id: jest.fn().mockReturnValue('test-provider'),
       callApi: jest.fn().mockResolvedValue({
         output: 'Hello, World',
-        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
       }),
     };
 
@@ -929,8 +1046,8 @@ describe('evaluator', () => {
     };
     const evalRecord = await Eval.create({}, testSuite.prompts, { id: randomUUID() });
     await evaluate(testSuite, evalRecord, {});
-
-    expect(evalRecord.results[0].testCase.metadata).toEqual({
+    const results = await evalRecord.getResults();
+    expect(results[0].testCase.metadata).toEqual({
       defaultKey: 'defaultValue',
       testKey: 'testValue',
     });
@@ -939,12 +1056,12 @@ describe('evaluator', () => {
   it('evaluate with _conversation variable', async () => {
     const mockApiProvider: ApiProvider = {
       id: jest.fn().mockReturnValue('test-provider'),
-      callApi: jest.fn().mockImplementation((prompt) => {
-        return Promise.resolve({
+      callApi: jest.fn().mockImplementation((prompt) =>
+        Promise.resolve({
           output: prompt,
-          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
-        });
-      }),
+          tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
+        }),
+      ),
     };
 
     const testSuite: TestSuite = {
@@ -976,7 +1093,7 @@ describe('evaluator', () => {
       label: 'Labeled Provider',
       callApi: jest.fn().mockResolvedValue({
         output: 'Labeled Provider Output',
-        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
       }),
     };
 
@@ -984,7 +1101,7 @@ describe('evaluator', () => {
       id: () => 'unlabeled-provider-id',
       callApi: jest.fn().mockResolvedValue({
         output: 'Unlabeled Provider Output',
-        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
       }),
     };
 
@@ -1114,7 +1231,7 @@ describe('evaluator', () => {
       id: jest.fn().mockReturnValue('test-provider-transform'),
       callApi: jest.fn().mockResolvedValue({
         output: 'Original output',
-        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
       }),
       transform: '`Provider: ${output}`',
     };
@@ -1155,7 +1272,7 @@ describe('evaluator', () => {
       id: jest.fn().mockReturnValue('test-provider-transform'),
       callApi: jest.fn().mockResolvedValue({
         output: 'Original output',
-        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
       }),
       transform: '`Provider: ${output}`',
     };
@@ -1202,7 +1319,7 @@ describe('evaluator', () => {
       id: jest.fn().mockReturnValue('test-provider-no-output'),
       callApi: jest.fn().mockResolvedValue({
         output: null,
-        tokenUsage: { total: 5, prompt: 5, completion: 0, cached: 0 },
+        tokenUsage: { total: 5, prompt: 5, completion: 0, cached: 0, numRequests: 1 },
       }),
     };
 
@@ -1228,7 +1345,7 @@ describe('evaluator', () => {
       id: jest.fn().mockReturnValue('test-provider-no-output'),
       callApi: jest.fn().mockResolvedValue({
         output: false,
-        tokenUsage: { total: 5, prompt: 5, completion: 0, cached: 0 },
+        tokenUsage: { total: 5, prompt: 5, completion: 0, cached: 0, numRequests: 1 },
       }),
     };
 
@@ -1253,7 +1370,7 @@ describe('evaluator', () => {
       id: jest.fn().mockReturnValue('test-provider'),
       callApi: jest.fn().mockResolvedValue({
         output: 'Test response',
-        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0 },
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
       }),
     };
 
@@ -1339,7 +1456,6 @@ describe('evaluator', () => {
 
     // Check if runExtensionHook was called 4 times (beforeAll, beforeEach, afterEach, afterAll)
     expect(mockedRunExtensionHook).toHaveBeenCalledTimes(4);
-    console.log('mockedRunExtensionHook', mockedRunExtensionHook.mock.calls);
     // Check beforeAll call
     expect(mockedRunExtensionHook).toHaveBeenNthCalledWith(
       1,
@@ -1387,12 +1503,19 @@ describe('evaluator', () => {
       [mockExtension],
       'afterAll',
       expect.objectContaining({
-        results: expect.arrayContaining([
+        prompts: expect.arrayContaining([
           expect.objectContaining({
-            success: true,
-            score: 1,
-            response: expect.objectContaining({
-              output: 'Test output',
+            raw: 'Test prompt {{ var1 }}',
+            metrics: expect.objectContaining({
+              assertPassCount: 1,
+              assertFailCount: 0,
+            }),
+          }),
+          expect.objectContaining({
+            raw: 'Test prompt {{ var1 }}',
+            metrics: expect.objectContaining({
+              assertPassCount: 1,
+              assertFailCount: 0,
             }),
           }),
         ]),
@@ -1415,6 +1538,198 @@ describe('evaluator', () => {
     expect(summary.stats.failures).toBe(0);
     expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
     expect(mockApiProvider2.callApi).toHaveBeenCalledTimes(1);
+  });
+
+  it('merges defaultTest.vars before applying transformVars', async () => {
+    const testSuite: TestSuite = {
+      providers: [mockApiProvider],
+      prompts: [toPrompt('Test prompt {{ test1 }} {{ test2 }} {{ test2UpperCase }}')],
+      defaultTest: {
+        vars: {
+          test2: 'bar',
+        },
+        options: {
+          transformVars: `
+            return {
+              ...vars,
+              test2UpperCase: vars.test2.toUpperCase()
+            };
+          `,
+        },
+      },
+      tests: [
+        {
+          vars: {
+            test1: 'foo',
+          },
+        },
+      ],
+    };
+
+    const evalRecord = await Eval.create({}, testSuite.prompts, { id: randomUUID() });
+    await evaluate(testSuite, evalRecord, {});
+    const summary = await evalRecord.toEvaluateSummary();
+
+    expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
+    expect(summary.stats.successes).toBe(1);
+    expect(summary.stats.failures).toBe(0);
+
+    // Check that vars were merged correctly and transform was applied
+    expect(summary.results[0].vars).toEqual({
+      test1: 'foo',
+      test2: 'bar',
+      test2UpperCase: 'BAR',
+    });
+
+    // Verify the prompt was rendered with all variables
+    expect(summary.results[0].prompt.raw).toBe('Test prompt foo bar BAR');
+  });
+
+  it('should maintain separate conversation histories based on metadata.conversationId', async () => {
+    const mockApiProvider = {
+      id: () => 'test-provider',
+      callApi: jest.fn().mockImplementation((prompt) => ({
+        output: 'Test output',
+      })),
+    };
+
+    const testSuite: TestSuite = {
+      providers: [mockApiProvider],
+      prompts: [
+        {
+          raw: '{% for completion in _conversation %}User: {{ completion.input }}\nAssistant: {{ completion.output }}\n{% endfor %}User: {{ question }}',
+          label: 'Conversation test',
+        },
+      ],
+      tests: [
+        // First conversation
+        {
+          vars: { question: 'Question 1A' },
+          metadata: { conversationId: 'conversation1' },
+        },
+        {
+          vars: { question: 'Question 1B' },
+          metadata: { conversationId: 'conversation1' },
+        },
+        // Second conversation
+        {
+          vars: { question: 'Question 2A' },
+          metadata: { conversationId: 'conversation2' },
+        },
+        {
+          vars: { question: 'Question 2B' },
+          metadata: { conversationId: 'conversation2' },
+        },
+      ],
+    };
+
+    const evalRecord = await Eval.create({}, testSuite.prompts, { id: randomUUID() });
+    await evaluate(testSuite, evalRecord, {});
+
+    // Check that the API was called with the correct prompts
+    expect(mockApiProvider.callApi).toHaveBeenCalledTimes(4);
+
+    // First conversation, first question
+    expect(mockApiProvider.callApi).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('User: Question 1A'),
+      expect.anything(),
+      expect.anything(),
+    );
+
+    // First conversation, second question (should include history)
+    expect(mockApiProvider.callApi).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('User: Question 1A\nAssistant: Test output\nUser: Question 1B'),
+      expect.anything(),
+      expect.anything(),
+    );
+
+    // Second conversation, first question (should NOT include first conversation)
+    expect(mockApiProvider.callApi).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('User: Question 2A'),
+      expect.anything(),
+      expect.anything(),
+    );
+
+    // Second conversation, second question (should only include second conversation history)
+    expect(mockApiProvider.callApi).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining('User: Question 2A\nAssistant: Test output\nUser: Question 2B'),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('evaluates with provider delay', async () => {
+    const mockApiProvider: ApiProvider = {
+      id: jest.fn().mockReturnValue('test-provider'),
+      delay: 100,
+      callApi: jest.fn().mockResolvedValue({
+        output: 'Test output',
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
+      }),
+    };
+
+    const testSuite: TestSuite = {
+      providers: [mockApiProvider],
+      prompts: [toPrompt('Test prompt')],
+      tests: [{}],
+    };
+
+    const evalRecord = await Eval.create({}, testSuite.prompts, { id: randomUUID() });
+    await evaluate(testSuite, evalRecord, {});
+
+    expect(sleep).toHaveBeenCalledWith(100);
+    expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
+  });
+
+  it('evaluates with no provider delay', async () => {
+    const mockApiProvider: ApiProvider = {
+      id: jest.fn().mockReturnValue('test-provider'),
+      callApi: jest.fn().mockResolvedValue({
+        output: 'Test output',
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
+      }),
+    };
+
+    const testSuite: TestSuite = {
+      providers: [mockApiProvider],
+      prompts: [toPrompt('Test prompt')],
+      tests: [{}],
+    };
+
+    const evalRecord = await Eval.create({}, testSuite.prompts, { id: randomUUID() });
+    await evaluate(testSuite, evalRecord, {});
+
+    expect(mockApiProvider.delay).toBe(0);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips delay for cached responses', async () => {
+    const mockApiProvider: ApiProvider = {
+      id: jest.fn().mockReturnValue('test-provider'),
+      delay: 100,
+      callApi: jest.fn().mockResolvedValue({
+        output: 'Test output',
+        tokenUsage: { total: 10, prompt: 5, completion: 5, cached: 0, numRequests: 1 },
+        cached: true,
+      }),
+    };
+
+    const testSuite: TestSuite = {
+      providers: [mockApiProvider],
+      prompts: [toPrompt('Test prompt')],
+      tests: [{}],
+    };
+
+    const evalRecord = await Eval.create({}, testSuite.prompts, { id: randomUUID() });
+    await evaluate(testSuite, evalRecord, {});
+
+    expect(sleep).not.toHaveBeenCalled();
+    expect(mockApiProvider.callApi).toHaveBeenCalledTimes(1);
   });
 });
 

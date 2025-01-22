@@ -1,4 +1,4 @@
-import type { EnvOverrides } from './types';
+import type { EnvOverrides } from './types/env';
 
 // Define the supported environment variables and their types
 export type EnvVars = {
@@ -14,22 +14,28 @@ export type EnvVars = {
   PROMPTFOO_CACHE_TTL?: number;
   PROMPTFOO_CACHE_TYPE?: 'memory' | 'disk';
   PROMPTFOO_CONFIG_DIR?: string;
+  PROMPTFOO_CSV_DELIMITER?: string;
   PROMPTFOO_DELAY_MS?: number;
   PROMPTFOO_DISABLE_AJV_STRICT_MODE?: boolean;
   PROMPTFOO_DISABLE_CONVERSATION_VAR?: boolean;
+  PROMPTFOO_DISABLE_ERROR_LOG?: boolean;
   PROMPTFOO_DISABLE_JSON_AUTOESCAPE?: boolean;
   PROMPTFOO_DISABLE_REDTEAM_MODERATION?: boolean;
   PROMPTFOO_DISABLE_REDTEAM_REMOTE_GENERATION?: boolean;
   PROMPTFOO_DISABLE_REF_PARSER?: boolean;
+  PROMPTFOO_DISABLE_SHARE_EMAIL_REQUEST?: boolean;
   PROMPTFOO_DISABLE_SHARE_WARNING?: boolean;
   PROMPTFOO_DISABLE_SHARING?: boolean;
   PROMPTFOO_DISABLE_TELEMETRY?: boolean;
+  PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS?: boolean;
   PROMPTFOO_DISABLE_TEMPLATING?: boolean;
   PROMPTFOO_DISABLE_UPDATE?: boolean;
   PROMPTFOO_DISABLE_VAR_EXPANSION?: boolean;
-  PROMPTFOO_DISABLE_SHARE_EMAIL_REQUEST?: boolean;
+  PROMPTFOO_ENABLE_DATABASE_LOGS?: boolean;
+  PROMPTFOO_EXPERIMENTAL?: boolean;
   PROMPTFOO_FAILED_TEST_EXIT_CODE?: number;
   PROMPTFOO_LIGHTWEIGHT_RESULTS?: boolean;
+  PROMPTFOO_LOG_DIR?: string;
   PROMPTFOO_NO_TESTCASE_ASSERT_WARNING?: boolean;
   PROMPTFOO_PASS_RATE_THRESHOLD?: number;
   PROMPTFOO_PROMPT_SEPARATOR?: string;
@@ -40,12 +46,12 @@ export type EnvVars = {
   PROMPTFOO_REQUEST_BACKOFF_MS?: number;
   PROMPTFOO_REQUIRE_JSON_PROMPTS?: boolean;
   PROMPTFOO_RETRY_5XX?: boolean;
+  PROMPTFOO_SELF_HOSTED?: boolean;
   PROMPTFOO_SHARING_APP_BASE_URL?: string;
   PROMPTFOO_SHORT_CIRCUIT_TEST_FAILURES?: boolean;
   PROMPTFOO_STRICT_FILES?: boolean;
-  PROMPTFOO_UNALIGNED_INFERENCE_ENDPOINT?: string;
   PROMPTFOO_TELEMETRY_DEBUG?: boolean;
-  PROMPTFOO_EXPERIMENTAL?: boolean;
+  PROMPTFOO_UNALIGNED_INFERENCE_ENDPOINT?: string;
   REQUEST_TIMEOUT_MS?: number;
   RESULT_HISTORY_LENGTH?: number;
   WEBHOOK_TIMEOUT?: number;
@@ -107,6 +113,9 @@ export type EnvVars = {
   REPLICATE_TOP_P?: number;
   VOYAGE_API_BASE_URL?: string;
   VOYAGE_API_KEY?: string;
+  WATSONX_AI_APIKEY?: string;
+  WATSONX_AI_PROJECT_ID?: string;
+  WATSONX_AI_BEARER_TOKEN?: string;
 
   // node/npm
   NODE_ENV?: string;
@@ -126,6 +135,17 @@ export type EnvVars = {
   BUDDY?: boolean;
   BUILDKITE?: boolean;
   TEAMCITY_VERSION?: boolean;
+
+  // Azure OpenAI auth params
+  AZURE_CLIENT_SECRET?: string;
+  AZURE_CLIENT_ID?: string;
+  AZURE_TENANT_ID?: string;
+  AZURE_AUTHORITY_HOST?: string;
+  AZURE_TOKEN_SCOPE?: string;
+  AZURE_DEPLOYMENT_NAME?: string;
+  AZURE_EMBEDDING_DEPLOYMENT_NAME?: string;
+  AZURE_OPENAI_DEPLOYMENT_NAME?: string;
+  AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME?: string;
 } & EnvOverrides;
 
 type EnvVarKey = keyof EnvVars;

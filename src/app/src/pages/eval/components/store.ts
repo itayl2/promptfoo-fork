@@ -57,9 +57,16 @@ interface TableState {
 
   inComparisonMode: boolean;
   setInComparisonMode: (inComparisonMode: boolean) => void;
+  stickyHeader: boolean;
+  setStickyHeader: (stickyHeader: boolean) => void;
 
   columnStates: Record<string, ColumnState>;
   setColumnState: (evalId: string, state: ColumnState) => void;
+
+  maxImageWidth: number;
+  setMaxImageWidth: (maxImageWidth: number) => void;
+  maxImageHeight: number;
+  setMaxImageHeight: (maxImageHeight: number) => void;
 }
 
 export const useStore = create<TableState>()(
@@ -105,6 +112,8 @@ export const useStore = create<TableState>()(
 
       inComparisonMode: false,
       setInComparisonMode: (inComparisonMode: boolean) => set(() => ({ inComparisonMode })),
+      stickyHeader: true,
+      setStickyHeader: (stickyHeader: boolean) => set(() => ({ stickyHeader })),
 
       columnStates: {},
       setColumnState: (evalId: string, state: ColumnState) =>
@@ -114,6 +123,11 @@ export const useStore = create<TableState>()(
             [evalId]: state,
           },
         })),
+
+      maxImageWidth: 256,
+      setMaxImageWidth: (maxImageWidth: number) => set(() => ({ maxImageWidth })),
+      maxImageHeight: 256,
+      setMaxImageHeight: (maxImageHeight: number) => set(() => ({ maxImageHeight })),
     }),
     {
       name: 'ResultsViewStorage',

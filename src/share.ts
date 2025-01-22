@@ -1,6 +1,5 @@
 import input from '@inquirer/input';
 import chalk from 'chalk';
-import type { Response } from 'node-fetch';
 import { URL } from 'url';
 import { SHARE_API_BASE_URL, SHARE_VIEW_BASE_URL, DEFAULT_SHARE_VIEW_BASE_URL } from './constants';
 import { getEnvBool, isCI } from './envars';
@@ -11,6 +10,7 @@ import { cloudConfig } from './globalConfig/cloud';
 import logger from './logger';
 import type Eval from './models/eval';
 import type { SharedResults } from './types';
+import invariant from './util/invariant';
 
 async function targetHostCanUseNewResults(apiHost: string): Promise<boolean> {
   const response = await fetchWithProxy(`${apiHost}/health`, {
@@ -29,11 +29,16 @@ async function targetHostCanUseNewResults(apiHost: string): Promise<boolean> {
 async function sendEvalResults(evalRecord: Eval, url: string) {
   await evalRecord.loadResults();
 
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (cloudConfig.isEnabled()) {
+    headers['Authorization'] = `Bearer ${cloudConfig.getApiKey()}`;
+  }
+
   const response = await fetchWithProxy(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify(evalRecord),
   });
 
@@ -83,6 +88,8 @@ export async function createShareableUrl(
       });
       setUserEmail(email);
     }
+    evalRecord.author = email;
+    await evalRecord.save();
   }
 
   let response: Response;
@@ -91,6 +98,17 @@ export async function createShareableUrl(
   if (cloudConfig.isEnabled()) {
     apiBaseUrl = cloudConfig.getApiHost();
     url = `${apiBaseUrl}/results`;
+
+    const loggedInEmail = getUserEmail();
+    invariant(loggedInEmail, 'User email is not set');
+    const evalAuthor = evalRecord.author;
+    if (evalAuthor !== loggedInEmail) {
+      logger.warn(
+        `Warning: Changing eval author from ${evalAuthor} to logged-in user ${loggedInEmail}`,
+      );
+    }
+    evalRecord.author = loggedInEmail;
+    await evalRecord.save();
   } else {
     apiBaseUrl =
       typeof evalRecord.config.sharing === 'object'
@@ -100,7 +118,8 @@ export async function createShareableUrl(
     url = `${apiBaseUrl}/api/eval`;
   }
 
-  const canUseNewResults = await targetHostCanUseNewResults(apiBaseUrl);
+  const canUseNewResults =
+    cloudConfig.isEnabled() || (await targetHostCanUseNewResults(apiBaseUrl));
   logger.debug(
     `Sharing with ${url} canUseNewResults: ${canUseNewResults} Use old results: ${evalRecord.useOldResults()}`,
   );
@@ -145,10 +164,14 @@ export async function createShareableUrl(
         body: JSON.stringify(sharedResults),
       });
     }
-
+    if (!response.ok) {
+      logger.error(`Failed to create shareable URL: ${response.statusText}`);
+      return null;
+    }
     const responseJson = (await response.json()) as { id?: string; error?: string };
     if (responseJson.error) {
-      throw new Error(`Failed to create shareable URL: ${responseJson.error}`);
+      logger.error(`Failed to create shareable URL: ${responseJson.error}`);
+      return null;
     }
     evalId = responseJson.id;
   }
@@ -157,7 +180,7 @@ export async function createShareableUrl(
   let fullUrl = SHARE_VIEW_BASE_URL;
   if (cloudConfig.isEnabled()) {
     appBaseUrl = cloudConfig.getAppUrl();
-    fullUrl = `${appBaseUrl}/results/${evalId}`;
+    fullUrl = `${appBaseUrl}/eval/${evalId}`;
   } else {
     const appBaseUrl =
       typeof evalRecord.config.sharing === 'object'

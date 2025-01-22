@@ -1,3 +1,4 @@
+import React, { useState, useCallback, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
@@ -9,7 +10,80 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Slider from '@mui/material/Slider';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import { useDebounce } from 'use-debounce';
 import { useStore as useResultsViewStore } from './store';
+
+const MemoizedRangeSlider = React.memo(
+  ({
+    value,
+    onChange,
+    min,
+    max,
+    label,
+    unlimited,
+    onChangeCommitted,
+  }: {
+    value: number;
+    onChange: (value: number) => void;
+    min: number;
+    max: number;
+    label: string;
+    unlimited?: boolean;
+    onChangeCommitted?: (value: number) => void;
+  }) => {
+    const [localValue, setLocalValue] = useState(value);
+    const [debouncedValue] = useDebounce(localValue, 150);
+
+    useEffect(() => {
+      if (debouncedValue !== value) {
+        onChange(debouncedValue);
+      }
+    }, [debouncedValue, onChange, value]);
+
+    const handleChange = useCallback(
+      (_: Event | React.SyntheticEvent, newValue: number | number[]) => {
+        setLocalValue(newValue as number);
+      },
+      [],
+    );
+
+    const handleChangeCommitted = useCallback(
+      (_: Event | React.SyntheticEvent, value: number | number[]) => {
+        if (onChangeCommitted) {
+          onChangeCommitted(value as number);
+        }
+      },
+      [onChangeCommitted],
+    );
+
+    return (
+      <Box maxWidth="sm">
+        <Typography mt={2}>
+          {label}: {unlimited && localValue === max ? 'Unlimited' : localValue}
+        </Typography>
+        <Slider
+          min={min}
+          max={max}
+          value={localValue}
+          onChange={handleChange}
+          onChangeCommitted={onChangeCommitted ? handleChangeCommitted : undefined}
+          marks={[
+            { value: min, label: String(min) },
+            { value: max, label: unlimited ? 'Unlimited' : String(max) },
+          ]}
+          sx={{
+            '& .MuiSlider-markLabel[data-index="0"]': {
+              transform: 'translateX(0%)',
+            },
+            '& .MuiSlider-markLabel[data-index="1"]': {
+              transform: 'translateX(-100%)',
+            },
+          }}
+        />
+      </Box>
+    );
+  },
+);
 
 interface SettingsModalProps {
   open: boolean;
@@ -32,11 +106,45 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
     setShowPrompts,
     showPassFail,
     setShowPassFail,
+    stickyHeader,
+    setStickyHeader,
+    maxImageWidth,
+    setMaxImageWidth,
+    maxImageHeight,
+    setMaxImageHeight,
   } = useResultsViewStore();
+
+  const [localMaxTextLength, setLocalMaxTextLength] = useState(
+    maxTextLength === Number.POSITIVE_INFINITY ? 1001 : maxTextLength,
+  );
+
+  const handleSliderChange = useCallback((value: number) => {
+    setLocalMaxTextLength(value);
+  }, []);
+
+  const handleSliderChangeCommitted = useCallback(
+    (value: number) => {
+      const newValue = value === 1001 ? Number.POSITIVE_INFINITY : value;
+      setMaxTextLength(newValue);
+    },
+    [setMaxTextLength],
+  );
+
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle>Table View Settings</DialogTitle>
       <DialogContent>
+        <Box>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={stickyHeader}
+                onChange={(e) => setStickyHeader(e.target.checked)}
+              />
+            }
+            label="Sticky header"
+          />
+        </Box>
         <Box>
           <Tooltip
             title="Forcing line breaks makes it easier to adjust column widths to your liking"
@@ -120,15 +228,29 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
             />
           </Tooltip>
         </Box>
-        <Box maxWidth="sm">
-          <Typography mt={2}>Max text length: {maxTextLength}</Typography>
-          <Slider
-            min={25}
-            max={1000}
-            value={maxTextLength}
-            onChange={(_, val: number | number[]) => setMaxTextLength(val as number)}
-          />
-        </Box>
+        <MemoizedRangeSlider
+          value={localMaxTextLength}
+          onChange={handleSliderChange}
+          onChangeCommitted={handleSliderChangeCommitted}
+          min={25}
+          max={1001}
+          label="Max text length"
+          unlimited
+        />
+        <MemoizedRangeSlider
+          value={maxImageWidth}
+          onChange={setMaxImageWidth}
+          min={100}
+          max={1000}
+          label="Max image width (px)"
+        />
+        <MemoizedRangeSlider
+          value={maxImageHeight}
+          onChange={setMaxImageHeight}
+          min={100}
+          max={1000}
+          label="Max image height (px)"
+        />
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Close</Button>
@@ -137,4 +259,4 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) => {
   );
 };
 
-export default SettingsModal;
+export default React.memo(SettingsModal);

@@ -16,6 +16,7 @@ These metrics are created by logical tests that are run on LLM output.
 | [contains-xml](#contains-xml)                                   | output contains valid xml                                          |
 | [cost](#cost)                                                   | Inference cost is below a threshold                                |
 | [equals](#equality)                                             | output matches exactly                                             |
+| [f-score](#f-score)                                             | F-score is above a threshold                                       |
 | [icontains](#contains)                                          | output contains substring, case insensitive                        |
 | [icontains-all](#contains-all)                                  | output contains all list of substrings, case insensitive           |
 | [icontains-any](#contains-any)                                  | output contains any of the listed substrings, case insensitive     |
@@ -613,3 +614,115 @@ You may also return a score:
   "reason": "The output meets the custom validation criteria"
 }
 ```
+
+### Rouge-N
+
+The `rouge-n` assertion checks if the Rouge-N score between the LLM output and expected value is above a given threshold.
+
+Rouge-N is a recall-oriented metric that measures the overlap of n-grams between the LLM output and the expected text. The score ranges from 0 (no overlap) to 1 (perfect match).
+
+Example:
+
+```yaml
+assert:
+  # Ensure Rouge-N score compared to "hello world" is >= 0.75 (default threshold)
+  - type: rouge-n
+    value: hello world
+
+  # With custom threshold
+  - type: rouge-n
+    threshold: 0.6
+    value: hello world
+```
+
+`value` can reference other variables using template syntax. For example:
+
+```yaml
+tests:
+  - vars:
+      expected: hello world
+    assert:
+      - type: rouge-n
+        value: '{{expected}}'
+```
+
+### BLEU
+
+BLEU (Bilingual Evaluation Understudy) is a precision-oriented metric that measures the quality of text by comparing it to one or more reference texts. The score ranges from 0 (no match) to 1 (perfect match). It considers exact matches of words and phrases (n-grams) between the output and reference text.
+
+While Rouge-N focuses on recall (how much of the reference text is captured), BLEU focuses on precision (how accurate the generated text is).
+
+Example:
+
+```yaml
+assert:
+  # Ensure BLEU score compared to "hello world" is >= 0.5 (default threshold)
+  - type: bleu
+    value: hello world
+
+  # With custom threshold
+  - type: bleu
+    threshold: 0.7
+    value: hello world
+```
+
+`value` can reference other variables using template syntax. For example:
+
+```yaml
+tests:
+  - vars:
+      expected: hello world
+    assert:
+      - type: bleu
+        value: '{{expected}}'
+```
+
+### F-Score
+
+F-score (also F1 score) is a measure of accuracy that considers both precision and recall. It is the harmonic mean of precision and recall, providing a single score that balances both metrics. The score ranges from 0 (worst) to 1 (best).
+
+F-score uses the [named metrics](/docs/configuration/expected-outputs/#defining-named-metrics) and [derived metrics](/docs/configuration/expected-outputs/#creating-derived-metrics) features.
+
+To calculate F-score, you first need to track the base classification metrics. We can do this using JavaScript assertions, for example:
+
+```yaml
+assert:
+  # Track true positives, false positives, etc
+  - type: javascript
+    value: "output.sentiment === 'positive' && context.vars.sentiment === 'positive' ? 1 : 0"
+    metric: true_positives
+    weight: 0
+
+  - type: javascript
+    value: "output.sentiment === 'positive' && context.vars.sentiment === 'negative' ? 1 : 0"
+    metric: false_positives
+    weight: 0
+
+  - type: javascript
+    value: "output.sentiment === 'negative' && context.vars.sentiment === 'positive' ? 1 : 0"
+    metric: false_negatives
+    weight: 0
+```
+
+Then define derived metrics to calculate precision, recall and F-score:
+
+```yaml
+derivedMetrics:
+  # Precision = TP / (TP + FP)
+  - name: precision
+    value: true_positives / (true_positives + false_positives)
+
+  # Recall = TP / (TP + FN)
+  - name: recall
+    value: true_positives / (true_positives + false_negatives)
+
+  # F1 Score = 2 * (precision * recall) / (precision + recall)
+  - name: f1_score
+    value: 2 * true_positives / (2 * true_positives + false_positives + false_negatives)
+```
+
+The F-score will be calculated automatically after the evaluation completes. A score closer to 1 indicates better performance.
+
+This is particularly useful for evaluating classification tasks like sentiment analysis, where you want to measure both the precision (accuracy of positive predictions) and recall (ability to find all positive cases).
+
+See [Github](https://github.com/promptfoo/promptfoo/tree/main/examples/f-score) for a complete example.

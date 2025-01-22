@@ -8,8 +8,10 @@ import { extractEntities } from '../../src/redteam/extraction/entities';
 import { extractSystemPurpose } from '../../src/redteam/extraction/purpose';
 import { synthesize, resolvePluginConfig } from '../../src/redteam/index';
 import { Plugins } from '../../src/redteam/plugins';
+import { shouldGenerateRemote, getRemoteHealthUrl } from '../../src/redteam/remoteGeneration';
 import { Strategies } from '../../src/redteam/strategies';
 import { validateStrategies } from '../../src/redteam/strategies';
+import { checkRemoteHealth } from '../../src/util/apiHealth';
 
 jest.mock('cli-progress');
 jest.mock('../../src/logger');
@@ -38,6 +40,9 @@ jest.mock('../../src/redteam/strategies', () => ({
   }),
 }));
 
+jest.mock('../../src/util/apiHealth');
+jest.mock('../../src/redteam/remoteGeneration');
+
 describe('synthesize', () => {
   const mockProvider = {
     callApi: jest.fn(),
@@ -53,7 +58,7 @@ describe('synthesize', () => {
     jest.spyOn(process, 'exit').mockImplementation((code?: string | number | null | undefined) => {
       throw new Error(`Process.exit called with code ${code}`);
     });
-    jest.mocked(validateStrategies).mockImplementation(() => {});
+    jest.mocked(validateStrategies).mockImplementation(async () => {});
     jest.mocked(cliProgress.SingleBar).mockReturnValue({
       increment: jest.fn(),
       start: jest.fn(),
@@ -219,7 +224,7 @@ describe('synthesize', () => {
       const mockStrategyAction = jest.fn().mockReturnValue([{ test: 'strategy case' }]);
       jest
         .spyOn(Strategies, 'find')
-        .mockReturnValue({ action: mockStrategyAction, key: 'mockStrategy' });
+        .mockReturnValue({ action: mockStrategyAction, id: 'mockStrategy' });
 
       await synthesize({
         language: 'en',
@@ -251,6 +256,94 @@ describe('synthesize', () => {
       expect(cliProgress.SingleBar).not.toHaveBeenCalled();
 
       process.env.LOG_LEVEL = originalLogLevel;
+    });
+  });
+
+  describe('API Health Check', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      jest.mocked(shouldGenerateRemote).mockReturnValue(true);
+      jest.mocked(getRemoteHealthUrl).mockReturnValue('https://api.test/health');
+      jest.mocked(checkRemoteHealth).mockResolvedValue({
+        status: 'OK',
+        message: 'Cloud API is healthy',
+      });
+    });
+
+    it('should check API health when remote generation is enabled', async () => {
+      await synthesize({
+        language: 'en',
+        numTests: 1,
+        plugins: [{ id: 'test-plugin', numTests: 1 }],
+        prompts: ['Test prompt'],
+        strategies: [],
+      });
+
+      expect(shouldGenerateRemote).toHaveBeenCalledWith();
+      expect(getRemoteHealthUrl).toHaveBeenCalledWith();
+      expect(checkRemoteHealth).toHaveBeenCalledWith('https://api.test/health');
+    });
+
+    it('should skip health check when remote generation is disabled', async () => {
+      jest.mocked(shouldGenerateRemote).mockReturnValue(false);
+
+      await synthesize({
+        language: 'en',
+        numTests: 1,
+        plugins: [{ id: 'test-plugin', numTests: 1 }],
+        prompts: ['Test prompt'],
+        strategies: [],
+      });
+
+      expect(shouldGenerateRemote).toHaveBeenCalledWith();
+      expect(getRemoteHealthUrl).not.toHaveBeenCalled();
+      expect(checkRemoteHealth).not.toHaveBeenCalled();
+    });
+
+    it('should throw error when health check fails', async () => {
+      jest.mocked(checkRemoteHealth).mockResolvedValue({
+        status: 'ERROR',
+        message: 'API is not accessible',
+      });
+
+      await expect(
+        synthesize({
+          language: 'en',
+          numTests: 1,
+          plugins: [{ id: 'test-plugin', numTests: 1 }],
+          prompts: ['Test prompt'],
+          strategies: [],
+        }),
+      ).rejects.toThrow('Unable to proceed with test generation: API is not accessible');
+    });
+
+    it('should skip health check when URL is null', async () => {
+      jest.mocked(getRemoteHealthUrl).mockReturnValue(null);
+
+      await synthesize({
+        language: 'en',
+        numTests: 1,
+        plugins: [{ id: 'test-plugin', numTests: 1 }],
+        prompts: ['Test prompt'],
+        strategies: [],
+      });
+
+      expect(shouldGenerateRemote).toHaveBeenCalledWith();
+      expect(getRemoteHealthUrl).toHaveBeenCalledWith();
+      expect(checkRemoteHealth).not.toHaveBeenCalled();
+    });
+
+    it('should log debug messages during health check', async () => {
+      await synthesize({
+        language: 'en',
+        numTests: 1,
+        plugins: [{ id: 'test-plugin', numTests: 1 }],
+        prompts: ['Test prompt'],
+        strategies: [],
+      });
+
+      expect(logger.debug).toHaveBeenCalledWith('Checking promptfoo API health...');
+      expect(logger.debug).toHaveBeenCalledWith('API health check passed');
     });
   });
 });

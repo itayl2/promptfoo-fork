@@ -6,7 +6,13 @@ sidebar_position: 60
 
 ## Out of memory error
 
-To increase the amount of memory available to Promptfoo, increase the node heap size using the `--max-old-space-size` flag. For example:
+If you have a large number of tests or your tests have large outputs, you may encounter an out of memory error. Setup promptfoo to handle this by following **all** of the following steps:
+
+1. Do not use the `--no-write` flag. We need to write to disk to avoid memory issues.
+2. Use the `--no-table` flag.
+3. Only output to `jsonl` ex: `--output results.jsonl`
+
+If you're still encountering memory issues, you can increase the amount of memory available to Promptfoo by setting the `NODE_OPTIONS` environment variable. For example:
 
 ```bash
 # 8192 MB is 8 GB. Set this to an appropriate value for your machine.
@@ -91,3 +97,24 @@ telnet 127.0.0.1 4444
 If you encounter errors in your Python script, the error message and stack trace will be displayed in the promptfoo output. Make sure to check this information for clues about what might be going wrong in your code.
 
 Remember that promptfoo runs your Python script in a separate process, so some standard debugging techniques may not work as expected. Using logging and remote debugging as described above are the most reliable ways to troubleshoot issues in your Python providers.
+
+## Debugging the Database
+
+1. Set environment variables:
+
+   ```sh
+   export PROMPTFOO_ENABLE_DATABASE_LOGS=true
+   export LOG_LEVEL=debug
+   ```
+
+2. Run your command:
+
+   ```sh
+   promptfoo eval
+   ```
+
+3. Disable logging when done:
+
+   ```sh
+   unset PROMPTFOO_ENABLE_DATABASE_LOGS
+   ```

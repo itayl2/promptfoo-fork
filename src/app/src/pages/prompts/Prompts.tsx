@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';
 import { callApi } from '@app/utils/api';
 import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
 import Pagination from '@mui/material/Pagination';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
@@ -27,6 +28,8 @@ export default function Prompts() {
   const [page, setPage] = useState(1);
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedPromptIndex, setSelectedPromptIndex] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const hasShownPopup = useRef(false);
 
   const handleSort = (field: string) => {
     const order = sortField === field && sortOrder === 'asc' ? 'desc' : 'asc';
@@ -36,19 +39,24 @@ export default function Prompts() {
 
   useEffect(() => {
     (async () => {
-      const response = await callApi('/prompts');
-      const data = await response.json();
-      if (data && data.data) {
-        const sortedData = [...data.data].sort((a, b) => {
-          if (sortField === null) {
-            return 0;
-          }
-          if (sortOrder === 'asc') {
-            return a[sortField] > b[sortField] ? 1 : -1;
-          }
-          return a[sortField] < b[sortField] ? 1 : -1;
-        });
-        setPrompts(sortedData);
+      setIsLoading(true);
+      try {
+        const response = await callApi('/prompts');
+        const data = await response.json();
+        if (data && data.data) {
+          const sortedData = [...data.data].sort((a, b) => {
+            if (sortField === null) {
+              return 0;
+            }
+            if (sortOrder === 'asc') {
+              return a[sortField] > b[sortField] ? 1 : -1;
+            }
+            return a[sortField] < b[sortField] ? 1 : -1;
+          });
+          setPrompts(sortedData);
+        }
+      } finally {
+        setIsLoading(false);
       }
     })();
   }, [sortField, sortOrder]);
@@ -59,11 +67,15 @@ export default function Prompts() {
   };
 
   useEffect(() => {
+    if (hasShownPopup.current) {
+      return;
+    }
     const promptId = searchParams.get('id');
     if (promptId) {
       const promptIndex = prompts.findIndex((prompt) => prompt.id.startsWith(promptId));
       if (promptIndex !== -1) {
         handleClickOpen(promptIndex);
+        hasShownPopup.current = true;
       }
     }
   }, [prompts, searchParams]);
@@ -151,6 +163,11 @@ export default function Prompts() {
           />
         )}
       </TableContainer>
+      {isLoading && (
+        <Box display="flex" justifyContent="center" my={4}>
+          <CircularProgress />
+        </Box>
+      )}
     </Box>
   );
 }

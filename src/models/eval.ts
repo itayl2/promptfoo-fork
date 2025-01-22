@@ -1,19 +1,18 @@
 import { randomUUID } from 'crypto';
 import { and, desc, eq, like, sql } from 'drizzle-orm';
-import invariant from 'tiny-invariant';
 import { DEFAULT_QUERY_LIMIT } from '../constants';
 import { getDb } from '../database';
 import {
-  datasets,
-  evals as evalsTable,
-  evalsToDatasets,
-  evalsToPrompts,
-  prompts as promptsTable,
-  tags as tagsTable,
-  evalsToTags,
+  datasetsTable,
+  evalsTable,
+  evalsToDatasetsTable,
+  evalsToPromptsTable,
+  promptsTable,
+  tagsTable,
+  evalsToTagsTable,
   evalResultsTable,
-  evalsToProviders,
 } from '../database/tables';
+import { getUserEmail } from '../globalConfig/accounts';
 import logger from '../logger';
 import { hashPrompt } from '../prompts/utils';
 import type {
@@ -30,9 +29,9 @@ import type {
 } from '../types';
 import { convertResultsToTable } from '../util/convertEvalResultsToTable';
 import { randomSequence, sha256 } from '../util/createHash';
+import invariant from '../util/invariant';
 import { getCurrentTimestamp } from '../util/time';
 import EvalResult from './evalResult';
-import type Provider from './provider';
 
 export function createEvalId(createdAt: Date = new Date()) {
   return `eval-${randomSequence(3)}-${createdAt.toISOString().slice(0, 19)}`;
@@ -93,10 +92,10 @@ export default class Eval {
       const evals = await tx.select().from(evalsTable).where(eq(evalsTable.id, id));
       const datasetResults = await tx
         .select({
-          datasetId: evalsToDatasets.datasetId,
+          datasetId: evalsToDatasetsTable.datasetId,
         })
-        .from(evalsToDatasets)
-        .where(eq(evalsToDatasets.evalId, id))
+        .from(evalsToDatasetsTable)
+        .where(eq(evalsToDatasetsTable.evalId, id))
         .limit(1);
 
       return { evals, datasetResults };
@@ -159,31 +158,27 @@ export default class Eval {
   ): Promise<Eval> {
     const createdAt = opts?.createdAt || new Date();
     const evalId = opts?.id || createEvalId(createdAt);
+    const author = opts?.author || getUserEmail();
     const db = getDb();
-    await db.transaction((tx) => {
-      tx.insert(evalsTable)
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(evalsTable)
         .values({
           id: evalId,
           createdAt: createdAt.getTime(),
-          author: opts?.author,
+          author,
           description: config.description,
           config,
           results: {},
         })
         .run();
-      if (opts?.results) {
-        const res = tx
-          .insert(evalResultsTable)
-          .values(opts.results?.map((r) => ({ ...r, evalId, id: randomUUID() })))
-          .run();
-        logger.debug(`Inserted ${res.changes} eval results`);
-      }
 
       for (const prompt of renderedPrompts) {
         const label = prompt.label || prompt.display || prompt.raw;
         const promptId = hashPrompt(prompt);
 
-        tx.insert(promptsTable)
+        await tx
+          .insert(promptsTable)
           .values({
             id: promptId,
             prompt: label,
@@ -191,7 +186,8 @@ export default class Eval {
           .onConflictDoNothing()
           .run();
 
-        tx.insert(evalsToPrompts)
+        await tx
+          .insert(evalsToPromptsTable)
           .values({
             evalId,
             promptId,
@@ -201,10 +197,18 @@ export default class Eval {
 
         logger.debug(`Inserting prompt ${promptId}`);
       }
+      if (opts?.results) {
+        const res = await tx
+          .insert(evalResultsTable)
+          .values(opts.results?.map((r) => ({ ...r, evalId, id: randomUUID() })))
+          .run();
+        logger.debug(`Inserted ${res.changes} eval results`);
+      }
 
       // Record dataset relation
       const datasetId = sha256(JSON.stringify(config.tests || []));
-      tx.insert(datasets)
+      await tx
+        .insert(datasetsTable)
         .values({
           id: datasetId,
           tests: config.tests,
@@ -212,7 +216,8 @@ export default class Eval {
         .onConflictDoNothing()
         .run();
 
-      tx.insert(evalsToDatasets)
+      await tx
+        .insert(evalsToDatasetsTable)
         .values({
           evalId,
           datasetId,
@@ -227,7 +232,8 @@ export default class Eval {
         for (const [tagKey, tagValue] of Object.entries(config.tags)) {
           const tagId = sha256(`${tagKey}:${tagValue}`);
 
-          tx.insert(tagsTable)
+          await tx
+            .insert(tagsTable)
             .values({
               id: tagId,
               name: tagKey,
@@ -236,7 +242,8 @@ export default class Eval {
             .onConflictDoNothing()
             .run();
 
-          tx.insert(evalsToTags)
+          await tx
+            .insert(evalsToTagsTable)
             .values({
               evalId,
               tagId,
@@ -343,7 +350,21 @@ export default class Eval {
     const newResult = await EvalResult.createFromEvaluateResult(this.id, result, test, {
       persist: this.persisted,
     });
-    this.results.push(newResult);
+    if (!this.persisted) {
+      // We're only going to keep results in memory if the eval isn't persisted in the database
+      // This is to avoid memory issues when running large evaluations
+      this.results.push(newResult);
+    }
+  }
+
+  async *fetchResultsBatched(batchSize: number = 100) {
+    for await (const batch of EvalResult.findManyByEvalIdBatched(this.id, { batchSize })) {
+      yield batch;
+    }
+  }
+
+  async fetchResultsByTestIdx(testIdx: number) {
+    return await EvalResult.findManyByEvalId(this.id, { testIdx });
   }
 
   async addPrompts(prompts: CompletedPrompt[]) {
@@ -351,24 +372,6 @@ export default class Eval {
     if (this.persisted) {
       const db = getDb();
       await db.update(evalsTable).set({ prompts }).where(eq(evalsTable.id, this.id)).run();
-    }
-  }
-
-  async addProviders(providers: Provider[]) {
-    if (this.persisted) {
-      const db = getDb();
-      await db.transaction(async (tx) => {
-        for (const provider of providers) {
-          const id = provider.id;
-          tx.insert(evalsToProviders)
-            .values({
-              evalId: this.id,
-              providerId: id,
-            })
-            .onConflictDoNothing()
-            .run();
-        }
-      });
     }
   }
 
@@ -401,21 +404,25 @@ export default class Eval {
     const stats: EvaluateStats = {
       successes: 0,
       failures: 0,
+      errors: 0,
       tokenUsage: {
         cached: 0,
         completion: 0,
         prompt: 0,
         total: 0,
+        numRequests: 0,
       },
     };
 
     for (const prompt of this.prompts) {
       stats.successes += prompt.metrics?.testPassCount || 0;
       stats.failures += prompt.metrics?.testFailCount || 0;
+      stats.errors += prompt.metrics?.testErrorCount || 0;
       stats.tokenUsage.prompt += prompt.metrics?.tokenUsage.prompt || 0;
       stats.tokenUsage.cached += prompt.metrics?.tokenUsage.cached || 0;
       stats.tokenUsage.completion += prompt.metrics?.tokenUsage.completion || 0;
       stats.tokenUsage.total += prompt.metrics?.tokenUsage.total || 0;
+      stats.tokenUsage.numRequests += prompt.metrics?.tokenUsage.numRequests || 0;
     }
 
     return {
@@ -444,17 +451,17 @@ export default class Eval {
   async delete() {
     const db = getDb();
     await db.transaction(() => {
-      db.delete(evalsToDatasets).where(eq(evalsToDatasets.evalId, this.id)).run();
-      db.delete(evalsToPrompts).where(eq(evalsToPrompts.evalId, this.id)).run();
-      db.delete(evalsToTags).where(eq(evalsToTags.evalId, this.id)).run();
-      db.delete(evalsToProviders).where(eq(evalsToProviders.evalId, this.id)).run();
+      db.delete(evalsToDatasetsTable).where(eq(evalsToDatasetsTable.evalId, this.id)).run();
+      db.delete(evalsToPromptsTable).where(eq(evalsToPromptsTable.evalId, this.id)).run();
+      db.delete(evalsToTagsTable).where(eq(evalsToTagsTable.evalId, this.id)).run();
+
       db.delete(evalResultsTable).where(eq(evalResultsTable.evalId, this.id)).run();
       db.delete(evalsTable).where(eq(evalsTable.id, this.id)).run();
     });
   }
 }
 
-export async function getSummaryofLatestEvals(
+export async function getSummaryOfLatestEvals(
   limit: number = DEFAULT_QUERY_LIMIT,
   filterDescription?: string,
   datasetId?: string,
@@ -466,15 +473,16 @@ export async function getSummaryofLatestEvals(
       evalId: evalsTable.id,
       createdAt: evalsTable.createdAt,
       description: evalsTable.description,
-      numTests: sql`MAX(${evalResultsTable.testIdx} + 1)`.as('numTests'),
-      datasetId: evalsToDatasets.datasetId,
+      numTests: sql`COUNT(DISTINCT ${evalResultsTable.testIdx})`.as('numTests'),
+      datasetId: evalsToDatasetsTable.datasetId,
+      isRedteam: sql<boolean>`json_type(${evalsTable.config}, '$.redteam') IS NOT NULL`,
     })
     .from(evalsTable)
-    .leftJoin(evalsToDatasets, eq(evalsTable.id, evalsToDatasets.evalId))
+    .leftJoin(evalsToDatasetsTable, eq(evalsTable.id, evalsToDatasetsTable.evalId))
     .leftJoin(evalResultsTable, eq(evalsTable.id, evalResultsTable.evalId))
     .where(
       and(
-        datasetId ? eq(evalsToDatasets.datasetId, datasetId) : undefined,
+        datasetId ? eq(evalsToDatasetsTable.datasetId, datasetId) : undefined,
         filterDescription ? like(evalsTable.description, `%${filterDescription}%`) : undefined,
         eq(evalsTable.results, {}),
       ),
@@ -489,6 +497,7 @@ export async function getSummaryofLatestEvals(
     description: result.description,
     numTests: (result.numTests as number) || 0,
     datasetId: result.datasetId,
+    isRedteam: result.isRedteam,
   }));
 
   const endTime = performance.now();

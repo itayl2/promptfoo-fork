@@ -1,7 +1,9 @@
 import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { IS_RUNNING_LOCALLY } from '@app/constants';
+import { useToast } from '@app/hooks/useToast';
 import { useStore as useMainStore } from '@app/stores/evalConfig';
-import { callApi } from '@app/utils/api';
+import { callApi, fetchUserEmail, updateEvalAuthor } from '@app/utils/api';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -13,34 +15,31 @@ import EyeIcon from '@mui/icons-material/Visibility';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
-import FormControl from '@mui/material/FormControl';
 import InputAdornment from '@mui/material/InputAdornment';
-import InputLabel from '@mui/material/InputLabel';
 import ListItemIcon from '@mui/material/ListItemIcon';
-import ListItemText from '@mui/material/ListItemText';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
-import OutlinedInput from '@mui/material/OutlinedInput';
 import type { SelectChangeEvent } from '@mui/material/Select';
-import Select from '@mui/material/Select';
-import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import type { StackProps } from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import { styled } from '@mui/material/styles';
 import { convertResultsToTable } from '@promptfoo/util/convertEvalResultsToTable';
+import invariant from '@promptfoo/util/invariant';
 import type { VisibilityState } from '@tanstack/table-core';
-import invariant from 'tiny-invariant';
 import { useDebounce } from 'use-debounce';
+import { AuthorChip } from './AuthorChip';
+import { ColumnSelector } from './ColumnSelector';
 import CompareEvalMenuItem from './CompareEvalMenuItem';
 import ConfigModal from './ConfigModal';
 import DownloadMenu from './DownloadMenu';
+import { EvalIdChip } from './EvalIdChip';
 import EvalSelectorDialog from './EvalSelectorDialog';
 import EvalSelectorKeyboardShortcut from './EvalSelectorKeyboardShortcut';
+import { FilterModeSelector } from './FilterModeSelector';
 import ResultsCharts from './ResultsCharts';
 import ResultsTable from './ResultsTable';
 import SettingsModal from './ResultsViewSettingsModal';
@@ -83,9 +82,10 @@ export default function ResultsView({
     setInComparisonMode,
     columnStates,
     setColumnState,
+    setAuthor,
   } = useResultsViewStore();
   const { setStateFromConfig } = useMainStore();
-
+  const { showToast } = useToast();
   const [searchText, setSearchText] = React.useState(searchParams.get('search') || '');
   const [debouncedSearchText] = useDebounce(searchText, 1000);
   const handleSearchTextChange = (text: string) => {
@@ -136,27 +136,31 @@ export default function ResultsView({
   };
 
   const handleShareButtonClick = async () => {
-    setShareLoading(true);
-
-    try {
-      const response = await callApi('/results/share', {
-        method: 'POST',
-        body: JSON.stringify({ id: currentEvalId }),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      const { url } = await response.json();
-      if (response.ok) {
-        setShareUrl(url);
-        setShareModalOpen(true);
-      } else {
+    if (IS_RUNNING_LOCALLY) {
+      setShareLoading(true);
+      try {
+        const response = await callApi('/results/share', {
+          method: 'POST',
+          body: JSON.stringify({ id: currentEvalId }),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        const { url } = await response.json();
+        if (response.ok) {
+          setShareUrl(url);
+          setShareModalOpen(true);
+        } else {
+          alert('Sorry, something went wrong.');
+        }
+      } catch {
         alert('Sorry, something went wrong.');
+      } finally {
+        setShareLoading(false);
       }
-    } catch {
-      alert('Sorry, something went wrong.');
-    } finally {
-      setShareLoading(false);
+    } else {
+      setShareUrl(`${window.location.host}/eval/?evalId=${currentEvalId}`);
+      setShareModalOpen(true);
     }
   };
 
@@ -215,9 +219,18 @@ export default function ResultsView({
 
   const promptOptions = head.prompts.map((prompt, idx) => {
     const label = prompt.label || prompt.display || prompt.raw;
+    const provider = prompt.provider || 'unknown';
+    const displayLabel = [
+      label && `"${label.slice(0, 60)}${label.length > 60 ? '...' : ''}"`,
+      provider && `[${provider}]`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
     return {
       value: `Prompt ${idx + 1}`,
-      label: `Prompt ${idx + 1}: ${label && label.length > 100 ? label.slice(0, 100) + '...' : label || ''}`,
+      label: displayLabel,
+      description: label,
       group: 'Prompts',
     };
   });
@@ -249,8 +262,8 @@ export default function ResultsView({
   );
 
   const currentColumnState = columnStates[currentEvalId] || {
-    selectedColumns: [],
-    columnVisibility: {},
+    selectedColumns: allColumns,
+    columnVisibility: allColumns.reduce((acc, col) => ({ ...acc, [col]: true }), {}),
   };
 
   const updateColumnVisibility = React.useCallback(
@@ -267,20 +280,10 @@ export default function ResultsView({
     [allColumns, setColumnState, currentEvalId],
   );
 
-  React.useEffect(() => {
-    if (
-      currentColumnState.selectedColumns.length === 0 ||
-      !currentColumnState.selectedColumns.every((col: string) => allColumns.includes(col))
-    ) {
-      updateColumnVisibility(allColumns);
-    }
-  }, [allColumns, currentColumnState.selectedColumns, updateColumnVisibility]);
-
   const handleChange = React.useCallback(
     (event: SelectChangeEvent<string[]>) => {
-      const newSelectedColumns = Array.isArray(event.target.value)
-        ? event.target.value
-        : event.target.value.split(',');
+      const newSelectedColumns =
+        typeof event.target.value === 'string' ? event.target.value.split(',') : event.target.value;
 
       updateColumnVisibility(newSelectedColumns);
     },
@@ -327,18 +330,40 @@ export default function ResultsView({
     }
   };
 
-  const [evalIdCopied, setEvalIdCopied] = React.useState(false);
   const [evalSelectorDialogOpen, setEvalSelectorDialogOpen] = React.useState(false);
 
-  const handleEvalIdCopyClick = async () => {
-    if (!evalId) {
-      return;
+  const handleEvalIdCopyClick = () => {
+    if (evalId) {
+      navigator.clipboard.writeText(evalId).then(
+        () => {
+          showToast('Eval ID copied to clipboard', 'success');
+        },
+        () => {
+          showToast('Failed to copy Eval ID to clipboard', 'error');
+          console.error('Failed to copy to clipboard');
+        },
+      );
     }
-    await navigator.clipboard.writeText(evalId);
-    setEvalIdCopied(true);
-    setTimeout(() => {
-      setEvalIdCopied(false);
-    }, 1000);
+  };
+
+  const [currentUserEmail, setCurrentUserEmail] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    fetchUserEmail().then((email) => {
+      setCurrentUserEmail(email);
+    });
+  }, []);
+
+  const handleEditAuthor = async (newAuthor: string) => {
+    if (evalId) {
+      try {
+        await updateEvalAuthor(evalId, newAuthor);
+        setAuthor(newAuthor);
+      } catch (error) {
+        console.error('Failed to update author:', error);
+        throw error;
+      }
+    }
   };
 
   return (
@@ -381,42 +406,13 @@ export default function ResultsView({
             title="Select an Eval"
           />
         </Box>
-        {config?.description && evalId && (
-          <>
-            <Tooltip title="Click to copy">
-              <Chip
-                size="small"
-                label={
-                  <>
-                    <strong>ID:</strong> {evalId}
-                  </>
-                }
-                sx={{
-                  opacity: 0.7,
-                  cursor: 'pointer',
-                }}
-                onClick={handleEvalIdCopyClick}
-              />
-            </Tooltip>
-            <Snackbar
-              open={evalIdCopied}
-              autoHideDuration={1000}
-              onClose={() => setEvalIdCopied(false)}
-              message="Eval id copied to clipboard"
-            />
-          </>
-        )}
-        <Tooltip title={author ? '' : 'Set eval author with `promptfoo config set email`'}>
-          <Chip
-            size="small"
-            label={
-              <>
-                <strong>Author:</strong> {author || 'Unknown'}
-              </>
-            }
-            sx={{ opacity: 0.7 }}
-          />
-        </Tooltip>
+        {evalId && <EvalIdChip evalId={evalId} onCopy={handleEvalIdCopyClick} />}
+        <AuthorChip
+          author={author}
+          onEditAuthor={handleEditAuthor}
+          currentUserEmail={currentUserEmail}
+          editable
+        />
         {Object.keys(config?.tags || {}).map((tag) => (
           <Chip
             key={tag}
@@ -428,42 +424,7 @@ export default function ResultsView({
       </ResponsiveStack>
       <ResponsiveStack direction="row" spacing={1} alignItems="center" sx={{ gap: 2 }}>
         <Box>
-          <FormControl sx={{ minWidth: 200, maxWidth: 350 }} size="small">
-            <InputLabel id="visible-columns-label">Columns</InputLabel>
-            <Select
-              labelId="visible-columns-label"
-              id="visible-columns"
-              multiple
-              value={currentColumnState.selectedColumns}
-              onChange={handleChange}
-              input={<OutlinedInput label="Visible columns" />}
-              renderValue={(selected: string[]) => selected.join(', ')}
-            >
-              {columnData.map((column) => (
-                <MenuItem dense key={column.value} value={column.value}>
-                  <Checkbox checked={currentColumnState.selectedColumns.includes(column.value)} />
-                  <ListItemText primary={column.label} />
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Box>
-        <Box>
-          <FormControl sx={{ minWidth: 180 }} size="small">
-            <InputLabel id="failure-filter-mode-label">Display</InputLabel>
-            <Select
-              labelId="filter-mode-label"
-              id="filter-mode"
-              value={filterMode}
-              onChange={handleFilterModeChange}
-              label="Filter"
-            >
-              <MenuItem value="all">Show all results</MenuItem>
-              <MenuItem value="failures">Show failures only</MenuItem>
-              <MenuItem value="different">Show different only</MenuItem>
-              <MenuItem value="highlights">Show highlights only</MenuItem>
-            </Select>
-          </FormControl>
+          <FilterModeSelector filterMode={filterMode} onChange={handleFilterModeChange} />
         </Box>
         <Box>
           <TextField
@@ -478,6 +439,20 @@ export default function ResultsView({
         <Box flexGrow={1} />
         <Box display="flex" justifyContent="flex-end">
           <ResponsiveStack direction="row" spacing={2}>
+            <ColumnSelector
+              columnData={columnData}
+              selectedColumns={currentColumnState.selectedColumns}
+              onChange={handleChange}
+            />
+            <Tooltip title="Edit table view settings" placement="bottom">
+              <Button
+                color="primary"
+                onClick={() => setViewSettingsModalOpen(true)}
+                startIcon={<SettingsIcon />}
+              >
+                Table Settings
+              </Button>
+            </Tooltip>
             <Button color="primary" onClick={handleOpenMenu} startIcon={<ArrowDropDownIcon />}>
               Eval actions
             </Button>
@@ -547,15 +522,6 @@ export default function ResultsView({
                 </Tooltip>
               </Menu>
             )}
-            <Tooltip title="Edit table view settings" placement="bottom">
-              <Button
-                color="primary"
-                onClick={() => setViewSettingsModalOpen(true)}
-                startIcon={<SettingsIcon />}
-              >
-                Table Settings
-              </Button>
-            </Tooltip>
             {/* TODO(Michael): Remove config.metadata.redteam check (2024-08-18) */}
             {(config?.redteam || config?.metadata?.redteam) && (
               <Tooltip title="View vulnerability scan report" placement="bottom">
@@ -586,6 +552,7 @@ export default function ResultsView({
         searchText={debouncedSearchText}
         onFailureFilterToggle={handleFailureFilterToggle}
         onSearchTextChange={handleSearchTextChange}
+        setFilterMode={setFilterMode}
       />
       <ConfigModal open={configModalOpen} onClose={() => setConfigModalOpen(false)} />
       <ShareModal

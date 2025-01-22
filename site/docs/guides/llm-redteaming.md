@@ -159,7 +159,7 @@ You should choose at least one target. If desired, set multiple in order to comp
 ```yaml
 targets:
   - openai:gpt-4o
-  - anthropic:messages:claude-3-5-sonnet-20240620
+  - anthropic:messages:claude-3-5-sonnet-20241022
   - ollama:chat:llama3.1:70b
 ```
 
@@ -200,12 +200,12 @@ targets:
         'Content-Type': 'application/json'
       body:
         my_prompt: '{{prompt}}'
-      responseParser: 'json.path[0].to.output'
+      transformResponse: 'json.path[0].to.output'
 ```
 
 Customize the HTTP request using a placeholder variable `{{prompt}}` that will be replaced by the final prompt during the pentest.
 
-If your API responds with a JSON object and you want to pick out a specific value, use the `responseParser` key to set a Javascript snippet that manipulates the provided `json` object.
+If your API responds with a JSON object and you want to pick out a specific value, use the `transformResponse` key to set a Javascript snippet that manipulates the provided `json` object.
 
 For example, `json.nested.output` will reference the output in the following API response:
 

@@ -1,3 +1,4 @@
+import { parse as csvParse } from 'csv-parse/sync';
 import { stringify } from 'csv-stringify/sync';
 import dedent from 'dedent';
 import dotenv from 'dotenv';
@@ -9,19 +10,17 @@ import yaml from 'js-yaml';
 import NodeCache from 'node-cache';
 import nunjucks from 'nunjucks';
 import * as path from 'path';
-import invariant from 'tiny-invariant';
 import cliState from '../cliState';
 import { TERMINAL_MAX_WIDTH } from '../constants';
 import { getDbSignalPath, getDb } from '../database';
 import {
-  datasets,
-  evals,
-  evalsToDatasets,
-  evalsToPrompts,
-  evalsToProviders,
-  evalsToTags,
-  prompts,
-  tags,
+  datasetsTable,
+  evalsTable,
+  evalsToDatasetsTable,
+  evalsToPromptsTable,
+  evalsToTagsTable,
+  promptsTable,
+  tagsTable,
   evalResultsTable,
 } from '../database/tables';
 import { getEnvBool } from '../envars';
@@ -29,8 +28,8 @@ import { getDirectory, importModule } from '../esm';
 import { getAuthor } from '../globalConfig/accounts';
 import { writeCsvToGoogleSheet } from '../googleSheets';
 import logger from '../logger';
-import { runDbMigrations } from '../migrate';
-import Eval, { createEvalId, getSummaryofLatestEvals } from '../models/eval';
+import Eval, { createEvalId, getSummaryOfLatestEvals } from '../models/eval';
+import type EvalResult from '../models/evalResult';
 import { generateIdFromPrompt } from '../models/prompt';
 import {
   type EvalWithMetadata,
@@ -52,16 +51,23 @@ import {
   isProviderOptions,
   OutputFileExtension,
   type EvaluateSummaryV2,
+  ResultFailureReason,
 } from '../types';
+import invariant from '../util/invariant';
 import { getConfigDirectoryPath } from './config/manage';
 import { sha256 } from './createHash';
+import { convertTestResultsToTableRow, getHeaderForTable } from './exportToFile';
 import { isJavascriptFile } from './file';
 import { getNunjucksEngine } from './templates';
 
 const DEFAULT_QUERY_LIMIT = 100;
 
 const outputToSimpleString = (output: EvaluateTableOutput) => {
-  const passFailText = output.pass ? '[PASS]' : '[FAIL]';
+  const passFailText = output.pass
+    ? '[PASS]'
+    : output.failureReason === ResultFailureReason.ASSERT
+      ? '[FAIL]'
+      : '[ERROR]';
   const namedScoresText = Object.entries(output.namedScores)
     .map(([name, value]) => `${name}: ${value?.toFixed(2)}`)
     .join(', ');
@@ -86,10 +92,9 @@ export async function writeOutput(
   evalRecord: Eval,
   shareableUrl: string | null,
 ) {
-  const table = await evalRecord.getTable();
-
-  invariant(table, 'Table is required');
   if (outputPath.match(/^https:\/\/docs\.google\.com\/spreadsheets\//)) {
+    const table = await evalRecord.getTable();
+    invariant(table, 'Table is required');
     const rows = table.body.map((row) => {
       const csvRow: CsvRow = {};
       table.head.vars.forEach((varName, index) => {
@@ -120,14 +125,33 @@ export async function writeOutput(
   }
 
   if (outputExtension === 'csv') {
-    const csvOutput = stringify([
-      [
-        ...table.head.vars,
-        ...table.head.prompts.map((prompt) => `[${prompt.provider}] ${prompt.label}`),
-      ],
-      ...table.body.map((row) => [...row.vars, ...row.outputs.map(outputToSimpleString)]),
+    // Write headers first
+    const headers = getHeaderForTable(evalRecord);
+
+    const headerCsv = stringify([
+      [...headers.vars, ...headers.prompts.map((prompt) => `[${prompt.provider}] ${prompt.label}`)],
     ]);
-    fs.writeFileSync(outputPath, csvOutput);
+    fs.writeFileSync(outputPath, headerCsv);
+
+    // Write body rows in batches
+    for await (const batchResults of evalRecord.fetchResultsBatched()) {
+      // we need split the batch into rows by testIdx
+      const tableRows: Record<number, EvalResult[]> = {};
+      for (const result of batchResults) {
+        if (!(result.testIdx in tableRows)) {
+          tableRows[result.testIdx] = [];
+        }
+        tableRows[result.testIdx].push(result);
+      }
+      const batchCsv = stringify(
+        Object.values(tableRows).map((results) => {
+          const row = convertTestResultsToTableRow(results, headers.vars);
+          return [...row.vars, ...row.outputs.map(outputToSimpleString)];
+        }),
+      );
+      console.log({ batchCsv });
+      fs.appendFileSync(outputPath, batchCsv);
+    }
   } else if (outputExtension === 'json') {
     const summary = await evalRecord.toEvaluateSummary();
     fs.writeFileSync(
@@ -155,6 +179,8 @@ export async function writeOutput(
       } as OutputFile),
     );
   } else if (outputExtension === 'html') {
+    const table = await evalRecord.getTable();
+    invariant(table, 'Table is required');
     const summary = await evalRecord.toEvaluateSummary();
     const template = fs.readFileSync(`${getDirectory()}/tableOutput.html`, 'utf-8');
     const htmlTable = [
@@ -170,6 +196,11 @@ export async function writeOutput(
       results: summary,
     });
     fs.writeFileSync(outputPath, htmlOutput);
+  } else if (outputExtension === 'jsonl') {
+    for await (const batchResults of evalRecord.fetchResultsBatched()) {
+      const text = batchResults.map((result) => JSON.stringify(result)).join('\n');
+      fs.appendFileSync(outputPath, text);
+    }
   }
 }
 
@@ -214,7 +245,7 @@ export async function writeResultsToDatabase(
   const promises = [];
   promises.push(
     db
-      .insert(evals)
+      .insert(evalsTable)
       .values({
         id: evalId,
         createdAt: createdAt.getTime(),
@@ -238,7 +269,7 @@ export async function writeResultsToDatabase(
 
     promises.push(
       db
-        .insert(prompts)
+        .insert(promptsTable)
         .values({
           id: promptId,
           prompt: label,
@@ -249,7 +280,7 @@ export async function writeResultsToDatabase(
 
     promises.push(
       db
-        .insert(evalsToPrompts)
+        .insert(evalsToPromptsTable)
         .values({
           evalId,
           promptId,
@@ -265,7 +296,7 @@ export async function writeResultsToDatabase(
   const datasetId = sha256(JSON.stringify(config.tests || []));
   promises.push(
     db
-      .insert(datasets)
+      .insert(datasetsTable)
       .values({
         id: datasetId,
         tests: config.tests,
@@ -276,7 +307,7 @@ export async function writeResultsToDatabase(
 
   promises.push(
     db
-      .insert(evalsToDatasets)
+      .insert(evalsToDatasetsTable)
       .values({
         evalId,
         datasetId,
@@ -294,7 +325,7 @@ export async function writeResultsToDatabase(
 
       promises.push(
         db
-          .insert(tags)
+          .insert(tagsTable)
           .values({
             id: tagId,
             name: tagKey,
@@ -306,7 +337,7 @@ export async function writeResultsToDatabase(
 
       promises.push(
         db
-          .insert(evalsToTags)
+          .insert(evalsToTagsTable)
           .values({
             evalId,
             tagId,
@@ -348,34 +379,36 @@ export async function listPreviousResults(
 
   const query = db
     .select({
-      evalId: evals.id,
-      createdAt: evals.createdAt,
-      description: evals.description,
-      numTests: sql<number>`json_array_length(${evals.results}->'table'->'body')`,
-      datasetId: evalsToDatasets.datasetId,
+      evalId: evalsTable.id,
+      createdAt: evalsTable.createdAt,
+      description: evalsTable.description,
+      numTests: sql<number>`json_array_length(${evalsTable.results}->'table'->'body')`,
+      datasetId: evalsToDatasetsTable.datasetId,
+      isRedteam: sql<boolean>`json_type(${evalsTable.config}, '$.redteam') IS NOT NULL`,
     })
-    .from(evals)
-    .leftJoin(evalsToDatasets, eq(evals.id, evalsToDatasets.evalId))
+    .from(evalsTable)
+    .leftJoin(evalsToDatasetsTable, eq(evalsTable.id, evalsToDatasetsTable.evalId))
     .where(
       and(
-        datasetId ? eq(evalsToDatasets.datasetId, datasetId) : undefined,
-        filterDescription ? like(evals.description, `%${filterDescription}%`) : undefined,
-        not(eq(evals.results, {})),
+        datasetId ? eq(evalsToDatasetsTable.datasetId, datasetId) : undefined,
+        filterDescription ? like(evalsTable.description, `%${filterDescription}%`) : undefined,
+        not(eq(evalsTable.results, {})),
       ),
     );
 
-  const results = query.orderBy(desc(evals.createdAt)).limit(limit).all();
+  const results = query.orderBy(desc(evalsTable.createdAt)).limit(limit).all();
   const mappedResults = results.map((result) => ({
     evalId: result.evalId,
     createdAt: result.createdAt,
     description: result.description,
     numTests: result.numTests,
     datasetId: result.datasetId,
+    isRedteam: result.isRedteam,
   }));
 
   const endTime = performance.now();
   const executionTime = endTime - startTime;
-  const evalResults = await getSummaryofLatestEvals(undefined, filterDescription, datasetId);
+  const evalResults = await getSummaryOfLatestEvals(undefined, filterDescription, datasetId);
   logger.debug(`listPreviousResults execution time: ${executionTime.toFixed(2)}ms`);
   const combinedResults = [...evalResults, ...mappedResults];
   return combinedResults;
@@ -474,12 +507,6 @@ export function readResult_fileSystem(
   } catch (err) {
     logger.error(`Failed to read results from ${resultsPath}:\n${err}`);
   }
-}
-
-export async function migrateResultsFromFileSystemToDatabase() {
-  // First run db migrations
-  logger.debug('Running db migrations...');
-  await runDbMigrations();
 }
 
 export async function readResult(
@@ -698,15 +725,15 @@ export async function getEvalsWithPredicate(
   const db = getDb();
   const evals_ = await db
     .select({
-      id: evals.id,
-      createdAt: evals.createdAt,
-      author: evals.author,
-      results: evals.results,
-      config: evals.config,
-      description: evals.description,
+      id: evalsTable.id,
+      createdAt: evalsTable.createdAt,
+      author: evalsTable.author,
+      results: evalsTable.results,
+      config: evalsTable.config,
+      description: evalsTable.description,
     })
-    .from(evals)
-    .orderBy(desc(evals.createdAt))
+    .from(evalsTable)
+    .orderBy(desc(evalsTable.createdAt))
     .limit(limit)
     .all();
 
@@ -756,13 +783,13 @@ export async function deleteEval(evalId: string) {
   const db = getDb();
   await db.transaction(async () => {
     // We need to clean up foreign keys first. We don't have onDelete: 'cascade' set on all these relationships.
-    await db.delete(evalsToPrompts).where(eq(evalsToPrompts.evalId, evalId)).run();
-    await db.delete(evalsToDatasets).where(eq(evalsToDatasets.evalId, evalId)).run();
-    await db.delete(evalsToTags).where(eq(evalsToTags.evalId, evalId)).run();
+    await db.delete(evalsToPromptsTable).where(eq(evalsToPromptsTable.evalId, evalId)).run();
+    await db.delete(evalsToDatasetsTable).where(eq(evalsToDatasetsTable.evalId, evalId)).run();
+    await db.delete(evalsToTagsTable).where(eq(evalsToTagsTable.evalId, evalId)).run();
     await db.delete(evalResultsTable).where(eq(evalResultsTable.evalId, evalId)).run();
-    await db.delete(evalsToProviders).where(eq(evalsToProviders.evalId, evalId)).run();
+
     // Finally, delete the eval record
-    const deletedIds = await db.delete(evals).where(eq(evals.id, evalId)).run();
+    const deletedIds = await db.delete(evalsTable).where(eq(evalsTable.id, evalId)).run();
     if (deletedIds.changes === 0) {
       throw new Error(`Eval with ID ${evalId} not found`);
     }
@@ -777,10 +804,11 @@ export async function deleteEval(evalId: string) {
 export async function deleteAllEvals(): Promise<void> {
   const db = getDb();
   await db.transaction(async (tx) => {
-    await tx.delete(evalsToPrompts).run();
-    await tx.delete(evalsToDatasets).run();
-    await tx.delete(evalsToTags).run();
-    await tx.delete(evals).run();
+    await tx.delete(evalResultsTable).run();
+    await tx.delete(evalsToPromptsTable).run();
+    await tx.delete(evalsToDatasetsTable).run();
+    await tx.delete(evalsToTagsTable).run();
+    await tx.delete(evalsTable).run();
   });
 }
 
@@ -849,28 +877,28 @@ export async function getStandaloneEvals({
   const db = getDb();
   const results = db
     .select({
-      evalId: evals.id,
-      description: evals.description,
-      results: evals.results,
-      createdAt: evals.createdAt,
-      promptId: evalsToPrompts.promptId,
-      datasetId: evalsToDatasets.datasetId,
-      tagName: tags.name,
-      tagValue: tags.value,
+      evalId: evalsTable.id,
+      description: evalsTable.description,
+      results: evalsTable.results,
+      createdAt: evalsTable.createdAt,
+      promptId: evalsToPromptsTable.promptId,
+      datasetId: evalsToDatasetsTable.datasetId,
+      tagName: tagsTable.name,
+      tagValue: tagsTable.value,
       isRedteam: sql`json_extract(evals.config, '$.redteam') IS NOT NULL`.as('isRedteam'),
     })
-    .from(evals)
-    .leftJoin(evalsToPrompts, eq(evals.id, evalsToPrompts.evalId))
-    .leftJoin(evalsToDatasets, eq(evals.id, evalsToDatasets.evalId))
-    .leftJoin(evalsToTags, eq(evals.id, evalsToTags.evalId))
-    .leftJoin(tags, eq(evalsToTags.tagId, tags.id))
+    .from(evalsTable)
+    .leftJoin(evalsToPromptsTable, eq(evalsTable.id, evalsToPromptsTable.evalId))
+    .leftJoin(evalsToDatasetsTable, eq(evalsTable.id, evalsToDatasetsTable.evalId))
+    .leftJoin(evalsToTagsTable, eq(evalsTable.id, evalsToTagsTable.evalId))
+    .leftJoin(tagsTable, eq(evalsToTagsTable.tagId, tagsTable.id))
     .where(
       and(
-        tag ? and(eq(tags.name, tag.key), eq(tags.value, tag.value)) : undefined,
-        description ? eq(evals.description, description) : undefined,
+        tag ? and(eq(tagsTable.name, tag.key), eq(tagsTable.value, tag.value)) : undefined,
+        description ? eq(evalsTable.description, description) : undefined,
       ),
     )
-    .orderBy(desc(evals.createdAt))
+    .orderBy(desc(evalsTable.createdAt))
     .limit(limit)
     .all();
 
@@ -1076,5 +1104,21 @@ export function maybeLoadFromExternalFile(filePath: string | object | Function |
   if (finalPath.endsWith('.yaml') || finalPath.endsWith('.yml')) {
     return yaml.load(contents);
   }
+  if (finalPath.endsWith('.csv')) {
+    const records = csvParse(contents, { columns: true });
+    // If single column, return array of values
+    if (records.length > 0 && Object.keys(records[0]).length === 1) {
+      return records.map((record: Record<string, string>) => Object.values(record)[0]);
+    }
+    return records;
+  }
   return contents;
+}
+
+export function isRunningUnderNpx(): boolean {
+  return Boolean(
+    process.env.npm_execpath?.includes('npx') ||
+      process.execPath.includes('npx') ||
+      process.env.npm_lifecycle_script?.includes('npx'),
+  );
 }

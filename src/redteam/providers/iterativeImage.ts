@@ -1,5 +1,4 @@
 import dedent from 'dedent';
-import invariant from 'tiny-invariant';
 import { renderPrompt } from '../../evaluatorHelpers';
 import logger from '../../logger';
 import type {
@@ -10,9 +9,10 @@ import type {
   NunjucksFilterMap,
   RedteamFileConfig,
 } from '../../types';
+import invariant from '../../util/invariant';
 import { extractFirstJsonObject } from '../../util/json';
-import { getNunjucksEngine } from '../../util/templates';
-import { loadRedteamProvider } from './shared';
+import { extractVariablesFromTemplates, getNunjucksEngine } from '../../util/templates';
+import { getTargetResponse, redteamProviderManager, type TargetResponse } from './shared';
 
 const NUM_ITERATIONS = process.env.PROMPTFOO_NUM_JAILBREAK_ITERATIONS
   ? Number.parseInt(process.env.PROMPTFOO_NUM_JAILBREAK_ITERATIONS, 10)
@@ -86,6 +86,8 @@ async function runRedteamConversation({
   redteamProvider,
   targetProvider,
   injectVar,
+  context,
+  options,
 }: {
   prompt: Prompt;
   filters: NunjucksFilterMap | undefined;
@@ -93,6 +95,8 @@ async function runRedteamConversation({
   redteamProvider: ApiProvider;
   targetProvider: ApiProvider;
   injectVar: string;
+  context?: CallApiContextParams;
+  options?: CallApiOptionsParams;
 }) {
   // Assume redteam provider is also a vision model
   const visionProvider = redteamProvider;
@@ -111,7 +115,14 @@ async function runRedteamConversation({
   ];
 
   let highestScore = 0;
-  let bestResponse = '';
+  let bestResponse: TargetResponse | null = null;
+  const totalTokenUsage = {
+    total: 0,
+    prompt: 0,
+    completion: 0,
+    numRequests: 0,
+    cached: 0,
+  };
 
   let targetPrompt: string | null = null;
   for (let i = 0; i < NUM_ITERATIONS; i++) {
@@ -119,6 +130,15 @@ async function runRedteamConversation({
 
     // Get new prompt
     const redteamResp = await redteamProvider.callApi(redteamBody);
+    if (redteamResp.tokenUsage) {
+      totalTokenUsage.total += redteamResp.tokenUsage.total || 0;
+      totalTokenUsage.prompt += redteamResp.tokenUsage.prompt || 0;
+      totalTokenUsage.completion += redteamResp.tokenUsage.completion || 0;
+      totalTokenUsage.cached += redteamResp.tokenUsage.cached ?? 0;
+    }
+    if (redteamResp.error) {
+      throw new Error(`Error from redteam provider: ${redteamResp.error}`);
+    }
     invariant(
       typeof redteamResp.output === 'string',
       `Expected output to be a string, but got response: ${JSON.stringify(redteamResp)}`,
@@ -154,23 +174,24 @@ async function runRedteamConversation({
       },
     ]);
     const isOnTopicResp = await redteamProvider.callApi(isOnTopicBody);
+    if (isOnTopicResp.tokenUsage) {
+      totalTokenUsage.total += isOnTopicResp.tokenUsage.total || 0;
+      totalTokenUsage.prompt += isOnTopicResp.tokenUsage.prompt || 0;
+      totalTokenUsage.completion += isOnTopicResp.tokenUsage.completion || 0;
+      totalTokenUsage.cached += isOnTopicResp.tokenUsage.cached ?? 0;
+    }
+    if (isOnTopicResp.error) {
+      throw new Error(`Error from redteam (onTopic) provider: ${isOnTopicResp.error}`);
+    }
     invariant(typeof isOnTopicResp.output === 'string', 'Expected output to be a string');
     const { isOnTopic } = extractFirstJsonObject<{ isOnTopic: boolean }>(isOnTopicResp.output);
     logger.debug(`Iteration ${i + 1}: On-topic response: ${isOnTopicResp.output}`);
 
-    let targetResponse;
-    try {
-      const targetResp = await targetProvider.callApi(targetPrompt);
-      targetResponse = targetResp.output || targetResp.error;
-    } catch (error) {
-      targetResponse = (error as Error).message;
-    }
-    invariant(typeof targetResponse === 'string', 'Expected output to be a string');
-    logger.debug(`Iteration ${i + 1}: Target response: ${targetResponse}`);
+    const targetResponse = await getTargetResponse(targetProvider, targetPrompt, context, options);
 
     // Parse URL from targetResponse
     const urlRegex = /(https?:\/\/[^\s)]+)/g;
-    const url = targetResponse.match(urlRegex);
+    const url = targetResponse.output.match(urlRegex);
     logger.debug(`Iteration ${i + 1}: URL: ${url}`);
     let imageDescription;
     if (url) {
@@ -194,6 +215,12 @@ async function runRedteamConversation({
           },
         ]),
       );
+      if (visionResponse.tokenUsage) {
+        totalTokenUsage.total += visionResponse.tokenUsage.total || 0;
+        totalTokenUsage.prompt += visionResponse.tokenUsage.prompt || 0;
+        totalTokenUsage.completion += visionResponse.tokenUsage.completion || 0;
+        totalTokenUsage.cached += visionResponse.tokenUsage.cached ?? 0;
+      }
       imageDescription = visionResponse.output;
       logger.debug(`Iteration ${i + 1}: Image description: ${imageDescription}`);
     }
@@ -210,6 +237,12 @@ async function runRedteamConversation({
       },
     ]);
     const judgeResp = await redteamProvider.callApi(judgeBody);
+    if (judgeResp.tokenUsage) {
+      totalTokenUsage.total += judgeResp.tokenUsage.total || 0;
+      totalTokenUsage.prompt += judgeResp.tokenUsage.prompt || 0;
+      totalTokenUsage.completion += judgeResp.tokenUsage.completion || 0;
+      totalTokenUsage.cached += judgeResp.tokenUsage.cached ?? 0;
+    }
     invariant(typeof judgeResp.output === 'string', 'Expected output to be a string');
     const { rating: score } = extractFirstJsonObject<{ rating: number }>(judgeResp.output);
     logger.debug(`Iteration ${i + 1}: Judge response: ${judgeResp.output}, Score: ${score}`);
@@ -229,6 +262,14 @@ async function runRedteamConversation({
         isOnTopic ? '' : '(your prompt was off-topic)'
       }`,
     });
+
+    if (targetResponse.tokenUsage) {
+      totalTokenUsage.total += targetResponse.tokenUsage.total || 0;
+      totalTokenUsage.prompt += targetResponse.tokenUsage.prompt || 0;
+      totalTokenUsage.completion += targetResponse.tokenUsage.completion || 0;
+      totalTokenUsage.numRequests += targetResponse.tokenUsage.numRequests ?? 1;
+      totalTokenUsage.cached += targetResponse.tokenUsage.cached ?? 0;
+    }
   }
 
   return {
@@ -236,17 +277,14 @@ async function runRedteamConversation({
     metadata: {
       redteamFinalPrompt: targetPrompt || undefined,
     },
+    tokenUsage: totalTokenUsage,
   };
 }
 
 class RedteamIterativeProvider implements ApiProvider {
   private readonly redteamProvider: RedteamFileConfig['provider'];
-  private readonly injectVar: string;
 
   constructor(readonly config: Record<string, string | object>) {
-    invariant(typeof config.injectVar === 'string', 'Expected injectVar to be set');
-    this.injectVar = config.injectVar;
-
     // Redteam provider can be set from the config.
     this.redteamProvider = config.redteamProvider;
   }
@@ -255,21 +293,28 @@ class RedteamIterativeProvider implements ApiProvider {
     return 'promptfoo:redteam:iterative:image';
   }
 
-  async callApi(prompt: string, context?: CallApiContextParams, options?: CallApiOptionsParams) {
+  async callApi(
+    prompt: string,
+    context?: CallApiContextParams & { injectVar?: string },
+    options?: CallApiOptionsParams,
+  ) {
     invariant(context?.originalProvider, 'Expected originalProvider to be set');
     invariant(context.vars, 'Expected vars to be set');
-
+    const injectVar = context.injectVar || extractVariablesFromTemplates([context.prompt.raw])[0];
+    invariant(injectVar, 'Expected injectVar to be set');
     return runRedteamConversation({
       prompt: context.prompt,
       filters: context.filters,
       vars: context.vars,
-      redteamProvider: await loadRedteamProvider({
+      redteamProvider: await redteamProviderManager.getProvider({
         provider: this.redteamProvider,
         preferSmallModel: false,
         jsonOnly: true,
       }),
       targetProvider: context.originalProvider,
-      injectVar: this.injectVar,
+      injectVar,
+      context,
+      options,
     });
   }
 }

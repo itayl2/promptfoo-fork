@@ -1,5 +1,4 @@
 import { type Page, type ElementHandle, type BrowserContext } from 'playwright';
-import invariant from 'tiny-invariant';
 import logger from '../logger';
 import type {
   ApiProvider,
@@ -8,6 +7,7 @@ import type {
   ProviderResponse,
 } from '../types';
 import { maybeLoadFromExternalFile } from '../util';
+import invariant from '../util/invariant';
 import { safeJsonStringify } from '../util/json';
 import { getNunjucksEngine } from '../util/templates';
 
@@ -20,21 +20,25 @@ interface BrowserAction {
 }
 
 interface BrowserProviderConfig {
-  steps: BrowserAction[];
-  responseParser?: string | Function;
-  timeoutMs?: number;
-  headless?: boolean;
   cookies?:
     | Array<{
-        name: string;
-        value: string;
         domain?: string;
+        name: string;
         path?: string;
+        value: string;
       }>
     | string;
+  headless?: boolean;
+  steps: BrowserAction[];
+  timeoutMs?: number;
+  transformResponse?: string | Function;
+  /**
+   * @deprecated
+   */
+  responseParser?: string | Function;
 }
 
-function createResponseParser(
+function createTransformResponse(
   parser: any,
 ): (extracted: Record<string, any>, finalHtml: string) => ProviderResponse {
   if (typeof parser === 'function') {
@@ -51,13 +55,15 @@ function createResponseParser(
 
 export class BrowserProvider implements ApiProvider {
   config: BrowserProviderConfig;
-  responseParser: (extracted: Record<string, any>, finalHtml: string) => ProviderResponse;
+  transformResponse: (extracted: Record<string, any>, finalHtml: string) => ProviderResponse;
   private defaultTimeout: number;
   private headless: boolean;
 
   constructor(_: string, options: ProviderOptions) {
     this.config = options.config as BrowserProviderConfig;
-    this.responseParser = createResponseParser(this.config.responseParser);
+    this.transformResponse = createTransformResponse(
+      this.config.transformResponse || this.config.responseParser,
+    );
     invariant(
       Array.isArray(this.config.steps),
       `Expected Headless provider to have a config containing {steps}, but got ${safeJsonStringify(
@@ -123,7 +129,7 @@ export class BrowserProvider implements ApiProvider {
     await browser.close();
 
     logger.debug(`Browser results: ${safeJsonStringify(extracted)}`);
-    const ret = this.responseParser(extracted, finalHtml);
+    const ret = this.transformResponse(extracted, finalHtml);
     logger.debug(`Browser response parser output: ${ret}`);
     return { output: ret };
   }
@@ -167,8 +173,14 @@ export class BrowserProvider implements ApiProvider {
           `Expected headless action to have a selector when using 'click'`,
         );
         logger.debug(`Waiting for and clicking on ${renderedArgs.selector}`);
-        await this.waitForSelector(page, renderedArgs.selector);
-        await page.click(renderedArgs.selector);
+        const element = await this.waitForSelector(page, renderedArgs.selector);
+        if (element) {
+          await page.click(renderedArgs.selector);
+        } else if (renderedArgs.optional) {
+          logger.debug(`Optional element ${renderedArgs.selector} not found, continuing`);
+        } else {
+          throw new Error(`Element not found: ${renderedArgs.selector}`);
+        }
         break;
       case 'type':
         invariant(renderedArgs.text, `Expected headless action to have a text when using 'type'`);

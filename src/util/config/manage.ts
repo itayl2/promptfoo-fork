@@ -3,6 +3,7 @@ import yaml from 'js-yaml';
 import * as os from 'os';
 import * as path from 'path';
 import { getEnvString } from '../../envars';
+import logger from '../../logger';
 import type { UnifiedConfig } from '../../types';
 import { orderKeys } from '../json';
 
@@ -19,9 +20,13 @@ export function setConfigDirectoryPath(newPath: string): void {
   configDirectoryPath = newPath;
 }
 
-export function writePromptfooConfig(config: Partial<UnifiedConfig>, outputPath: string) {
+export function writePromptfooConfig(
+  config: Partial<UnifiedConfig>,
+  outputPath: string,
+): Partial<UnifiedConfig> {
   const orderedConfig = orderKeys(config, [
     'description',
+    'targets',
     'prompts',
     'providers',
     'redteam',
@@ -29,5 +34,14 @@ export function writePromptfooConfig(config: Partial<UnifiedConfig>, outputPath:
     'tests',
     'scenarios',
   ]);
-  fs.writeFileSync(outputPath, yaml.dump(orderedConfig, { skipInvalid: true }));
+  const yamlContent = yaml.dump(orderedConfig, { skipInvalid: true });
+  if (!yamlContent) {
+    logger.warn('Warning: config is empty, skipping write');
+    return orderedConfig;
+  }
+  fs.writeFileSync(
+    outputPath,
+    `# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json\n${yamlContent}`,
+  );
+  return orderedConfig;
 }

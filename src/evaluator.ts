@@ -1,10 +1,10 @@
 import async from 'async';
 import chalk from 'chalk';
 import type { MultiBar, SingleBar } from 'cli-progress';
+import { randomUUID } from 'crypto';
 import { globSync } from 'glob';
 import * as path from 'path';
 import readline from 'readline';
-import invariant from 'tiny-invariant';
 import { runAssertions, runCompareAssertion } from './assertions';
 import { fetchWithCache, getCache } from './cache';
 import cliState from './cliState';
@@ -13,23 +13,26 @@ import { renderPrompt, runExtensionHook } from './evaluatorHelpers';
 import logger from './logger';
 import type Eval from './models/eval';
 import { generateIdFromPrompt } from './models/prompt';
-import Provider from './models/provider';
-import { maybeEmitAzureOpenAiWarning } from './providers/azureopenaiUtil';
+import { maybeEmitAzureOpenAiWarning } from './providers/azureUtil';
 import { generatePrompts } from './suggestions';
 import telemetry from './telemetry';
-import type {
-  ApiProvider,
-  Assertion,
-  CompletedPrompt,
-  EvaluateOptions,
-  EvaluateResult,
-  EvaluateStats,
-  Prompt,
-  ProviderResponse,
-  RunEvalOptions,
-  TestSuite,
+import {
+  ResultFailureReason,
+  type ApiProvider,
+  type Assertion,
+  type CompletedPrompt,
+  type EvaluateOptions,
+  type EvaluateResult,
+  type EvaluateStats,
+  type Prompt,
+  type ProviderResponse,
+  type RunEvalOptions,
+  type TestSuite,
 } from './types';
-import { transform, TransformInputType } from './util/transform';
+import { JsonlFileWriter } from './util/exportToFile/writeToFile';
+import invariant from './util/invariant';
+import { sleep } from './util/time';
+import { transform, type TransformContext, TransformInputType } from './util/transform';
 
 export const DEFAULT_MAX_CONCURRENCY = 4;
 
@@ -109,7 +112,7 @@ class Evaluator {
     { prompt: string | object; input: string; output: string | object }[]
   >;
   registers: Record<string, string | object>;
-
+  fileWriters: JsonlFileWriter[];
   constructor(testSuite: TestSuite, evalRecord: Eval, options: EvaluateOptions) {
     this.testSuite = testSuite;
     this.evalRecord = evalRecord;
@@ -117,15 +120,25 @@ class Evaluator {
     this.stats = {
       successes: 0,
       failures: 0,
+      errors: 0,
       tokenUsage: {
         total: 0,
         prompt: 0,
         completion: 0,
         cached: 0,
+        numRequests: 0,
       },
     };
     this.conversations = {};
     this.registers = {};
+
+    const jsonlFiles = Array.isArray(evalRecord.config.outputPath)
+      ? evalRecord.config.outputPath.filter((p) => p.endsWith('.jsonl'))
+      : evalRecord.config.outputPath?.endsWith('.jsonl')
+        ? [evalRecord.config.outputPath]
+        : [];
+
+    this.fileWriters = jsonlFiles.map((p) => new JsonlFileWriter(p));
   }
 
   async runEval({
@@ -141,9 +154,15 @@ class Evaluator {
     // Use the original prompt to set the label, not renderedPrompt
     const promptLabel = prompt.label;
 
+    provider.delay ??= delay ?? getEnvInt('PROMPTFOO_DELAY_MS', 0);
+    invariant(
+      typeof provider.delay === 'number',
+      `Provider delay should be set for ${provider.label}`,
+    );
+
     // Set up the special _conversation variable
     const vars = test.vars || {};
-    const conversationKey = `${provider.label || provider.id()}:${prompt.id}`;
+    const conversationKey = `${provider.label || provider.id()}:${prompt.id}${test.metadata?.conversationId ? `:${test.metadata.conversationId}` : ''}`;
     const usesConversation = prompt.raw.includes('_conversation');
     if (
       !getEnvBool('PROMPTFOO_DISABLE_CONVERSATION_VAR') &&
@@ -233,21 +252,16 @@ class Evaluator {
         output: response.output || '',
       });
 
-      if (!response.cached) {
-        let sleep = provider.delay ?? delay;
-        if (!sleep) {
-          sleep = getEnvInt('PROMPTFOO_DELAY_MS', 0);
-        }
-        if (sleep) {
-          logger.debug(`Sleeping for ${sleep}ms`);
-          await new Promise((resolve) => setTimeout(resolve, sleep));
-        }
+      if (!response.cached && provider.delay > 0) {
+        logger.debug(`Sleeping for ${provider.delay}ms`);
+        await sleep(provider.delay);
       }
 
       const ret: EvaluateResult = {
         ...setup,
         response,
         success: false,
+        failureReason: ResultFailureReason.NONE,
         score: 0,
         namedScores: {},
         latencyMs,
@@ -291,6 +305,7 @@ class Evaluator {
         });
         if (!checkResult.pass) {
           ret.error = checkResult.reason;
+          ret.failureReason = ResultFailureReason.ASSERT;
         }
         ret.success = checkResult.pass;
         ret.score = checkResult.score;
@@ -300,6 +315,7 @@ class Evaluator {
           this.stats.tokenUsage.prompt += checkResult.tokensUsed.prompt || 0;
           this.stats.tokenUsage.completion += checkResult.tokensUsed.completion || 0;
           this.stats.tokenUsage.cached += checkResult.tokensUsed.cached || 0;
+          this.stats.tokenUsage.numRequests += checkResult.tokensUsed.numRequests || 1;
         }
         ret.response = processedResponse;
         ret.gradingResult = checkResult;
@@ -311,10 +327,13 @@ class Evaluator {
         this.stats.tokenUsage.prompt += response.tokenUsage.prompt || 0;
         this.stats.tokenUsage.completion += response.tokenUsage.completion || 0;
         this.stats.tokenUsage.cached += response.tokenUsage.cached || 0;
+        this.stats.tokenUsage.numRequests += response.tokenUsage.numRequests || 1;
       }
 
       if (ret.success) {
         this.stats.successes++;
+      } else if (ret.failureReason === ResultFailureReason.ERROR) {
+        this.stats.errors++;
       } else {
         this.stats.failures++;
       }
@@ -326,11 +345,12 @@ class Evaluator {
 
       return ret;
     } catch (err) {
-      this.stats.failures++;
+      this.stats.errors++;
       return {
         ...setup,
         error: String(err) + '\n\n' + (err as Error).stack,
         success: false,
+        failureReason: ResultFailureReason.ERROR,
         score: 0,
         namedScores: {},
         latencyMs,
@@ -344,7 +364,17 @@ class Evaluator {
 
   async evaluate(): Promise<Eval> {
     const { testSuite, options } = this;
+    const checkAbort = () => {
+      if (options.abortSignal?.aborted) {
+        throw new Error('Operation cancelled');
+      }
+    };
+
+    // Add abort checks at key points
+    checkAbort();
+
     const prompts: CompletedPrompt[] = [];
+    const assertionTypes = new Set<string>();
     const rowsWithSelectBestAssertion = new Set<number>();
 
     await runExtensionHook(testSuite.extensions, 'beforeAll', { suite: testSuite });
@@ -388,7 +418,8 @@ class Evaluator {
 
       if (numAdded < 1) {
         logger.info(chalk.red('No prompts selected. Aborting.'));
-        process.exit(1);
+        process.exitCode = 1;
+        return this.evalRecord;
       }
     }
 
@@ -410,6 +441,7 @@ class Evaluator {
             score: 0,
             testPassCount: 0,
             testFailCount: 0,
+            testErrorCount: 0,
             assertPassCount: 0,
             assertFailCount: 0,
             totalLatencyMs: 0,
@@ -418,6 +450,7 @@ class Evaluator {
               prompt: 0,
               completion: 0,
               cached: 0,
+              numRequests: 0,
             },
             namedScores: {},
             namedScoresCount: {},
@@ -493,17 +526,20 @@ class Evaluator {
     const varsWithSpecialColsRemoved: Record<string, string | string[] | object>[] = [];
     const inputTransformDefault = testSuite?.defaultTest?.options?.transformVars;
     for (const testCase of tests) {
+      testCase.vars = { ...testSuite.defaultTest?.vars, ...testCase?.vars };
       if (testCase.vars) {
         const varWithSpecialColsRemoved: Record<string, string | string[] | object> = {};
         const inputTransformForIndividualTest = testCase.options?.transformVars;
         const inputTransform = inputTransformForIndividualTest || inputTransformDefault;
         if (inputTransform) {
+          const transformContext: TransformContext = {
+            prompt: {},
+            uuid: randomUUID(),
+          };
           const transformedVars = await transform(
             inputTransform,
             testCase.vars,
-            {
-              prompt: {},
-            },
+            transformContext,
             true,
             TransformInputType.VARS,
           );
@@ -535,11 +571,11 @@ class Evaluator {
         `testCase.assert is not an array in test case #${index + 1}`,
       );
       // Handle default properties
-      testCase.vars = { ...testSuite.defaultTest?.vars, ...testCase.vars };
       testCase.assert = [...(testSuite.defaultTest?.assert || []), ...(testCase.assert || [])];
       testCase.threshold = testCase.threshold ?? testSuite.defaultTest?.threshold;
       testCase.options = { ...testSuite.defaultTest?.options, ...testCase.options };
       testCase.metadata = { ...testSuite.defaultTest?.metadata, ...testCase.metadata };
+      testCase.provider = testCase.provider || testSuite.defaultTest?.provider;
 
       const prependToPrompt =
         testCase.options?.prefix || testSuite.defaultTest?.options?.prefix || '';
@@ -617,6 +653,11 @@ class Evaluator {
       if (evalStep.test.assert?.some((a) => a.type === 'select-best')) {
         rowsWithSelectBestAssertion.add(row.testIdx);
       }
+      for (const assert of evalStep.test.assert || []) {
+        if (assert.type) {
+          assertionTypes.add(assert.type);
+        }
+      }
 
       numComplete++;
       if (options.progressCallback) {
@@ -633,6 +674,11 @@ class Evaluator {
       } catch (error) {
         logger.error(`Error saving result: ${error} ${JSON.stringify(row)}`);
       }
+
+      for (const writer of this.fileWriters) {
+        await writer.write(row);
+      }
+
       const { promptIdx } = row;
       const metrics = prompts[promptIdx].metrics;
       invariant(metrics, 'Expected prompt.metrics to be set');
@@ -663,7 +709,13 @@ class Evaluator {
         }
       }
       metrics.testPassCount += row.success ? 1 : 0;
-      metrics.testFailCount += row.success ? 0 : 1;
+      if (!row.success) {
+        if (row.failureReason === ResultFailureReason.ERROR) {
+          metrics.testErrorCount += 1;
+        } else {
+          metrics.testFailCount += 1;
+        }
+      }
       metrics.assertPassCount +=
         row.gradingResult?.componentResults?.filter((r) => r.pass).length || 0;
       metrics.assertFailCount +=
@@ -677,6 +729,8 @@ class Evaluator {
         (metrics.tokenUsage.prompt || 0) + (row.response?.tokenUsage?.prompt || 0);
       metrics.tokenUsage.total =
         (metrics.tokenUsage.total || 0) + (row.response?.tokenUsage?.total || 0);
+      metrics.tokenUsage.numRequests =
+        (metrics.tokenUsage.numRequests || 0) + (row.response?.tokenUsage?.numRequests || 1);
       metrics.cost += row.cost || 0;
 
       await runExtensionHook(testSuite.extensions, 'afterEach', {
@@ -689,12 +743,22 @@ class Evaluator {
     let multibar: MultiBar | undefined;
     let multiProgressBars: SingleBar[] = [];
     const originalProgressCallback = this.options.progressCallback;
+    const isWebUI = Boolean(cliState.webUI);
+
     this.options.progressCallback = (completed, total, index, evalStep) => {
       if (originalProgressCallback) {
         originalProgressCallback(completed, total, index, evalStep);
       }
 
-      if (multibar && evalStep) {
+      if (isWebUI) {
+        const provider = evalStep.provider.label || evalStep.provider.id();
+        const vars = Object.entries(evalStep.test.vars || {})
+          .map(([k, v]) => `${k}=${v}`)
+          .join(' ')
+          .slice(0, 50)
+          .replace(/\n/g, ' ');
+        logger.info(`[${numComplete}/${total}] Running ${provider} with vars: ${vars}`);
+      } else if (multibar && evalStep) {
         const threadIndex = index % concurrency;
         const progressbar = multiProgressBars[threadIndex];
         progressbar.increment({
@@ -712,6 +776,11 @@ class Evaluator {
     };
 
     const createMultiBars = async (evalOptions: RunEvalOptions[]) => {
+      // Only create progress bars if not in web UI mode
+      if (isWebUI) {
+        return;
+      }
+
       const cliProgress = await import('cli-progress');
       multibar = new cliProgress.MultiBar(
         {
@@ -754,19 +823,39 @@ class Evaluator {
       }
     }
 
-    // Run serial evaluations first
-    for (const evalStep of serialRunEvalOptions) {
-      await processEvalStep(evalStep, serialRunEvalOptions.indexOf(evalStep));
+    if (serialRunEvalOptions.length > 0) {
+      // Run serial evaluations first
+      logger.info(`Running ${serialRunEvalOptions.length} serial evaluations...`);
+      for (const evalStep of serialRunEvalOptions) {
+        if (isWebUI) {
+          const provider = evalStep.provider.label || evalStep.provider.id();
+          const vars = Object.entries(evalStep.test.vars || {})
+            .map(([k, v]) => `${k}=${v}`)
+            .join(' ')
+            .slice(0, 50)
+            .replace(/\n/g, ' ');
+          logger.info(
+            `[${numComplete}/${serialRunEvalOptions.length}] Running ${provider} with vars: ${vars}`,
+          );
+        }
+        await processEvalStep(evalStep, serialRunEvalOptions.indexOf(evalStep));
+      }
     }
 
     // Then run concurrent evaluations
-    await async.forEachOfLimit(concurrentRunEvalOptions, concurrency, processEvalStep);
+    logger.info(
+      `Running ${concurrentRunEvalOptions.length} concurrent evaluations with ${concurrency} threads...`,
+    );
+    await async.forEachOfLimit(concurrentRunEvalOptions, concurrency, async (evalStep, index) => {
+      checkAbort();
+      await processEvalStep(evalStep, index);
+    });
 
     // Do we have to run comparisons between row outputs?
     const compareRowsCount = rowsWithSelectBestAssertion.size;
 
     let progressBar;
-    if (compareRowsCount > 0 && multibar) {
+    if (compareRowsCount > 0 && multibar && !isWebUI) {
       progressBar = multibar.create(compareRowsCount, 0, {
         provider: 'Running model-graded comparisons',
         prompt: '',
@@ -777,7 +866,13 @@ class Evaluator {
     for (const testIdx of rowsWithSelectBestAssertion) {
       compareCount++;
 
-      const resultsToCompare = this.evalRecord.results.filter((r) => r.testIdx === testIdx);
+      if (isWebUI) {
+        logger.info(`Running model-graded comparison ${compareCount} of ${compareRowsCount}...`);
+      }
+
+      const resultsToCompare = this.evalRecord.persisted
+        ? await this.evalRecord.fetchResultsByTestIdx(testIdx)
+        : this.evalRecord.results.filter((r) => r.testIdx === testIdx);
       if (resultsToCompare.length === 0) {
         logger.warn(`Expected results to be found for test index ${testIdx}`);
         continue;
@@ -837,15 +932,13 @@ class Evaluator {
           progressBar.increment({
             prompt: resultsToCompare[0].prompt.raw.slice(0, 10).replace(/\n/g, ''),
           });
-        } else {
+        } else if (!isWebUI) {
           logger.debug(`Model-graded comparison #${compareCount} of ${compareRowsCount} complete`);
         }
       }
     }
 
     await this.evalRecord.addPrompts(prompts);
-    const providers = await Provider.createMultiple(testSuite.providers);
-    await this.evalRecord.addProviders(providers);
 
     // Finish up
     if (multibar) {
@@ -856,13 +949,20 @@ class Evaluator {
     }
 
     await runExtensionHook(testSuite.extensions, 'afterAll', {
-      results: this.evalRecord.results.map((r) => r.toEvaluateResult()),
+      prompts: this.evalRecord.prompts,
       suite: testSuite,
     });
 
     telemetry.record('eval_ran', {
       numPrompts: prompts.length,
-      numTests: tests.length,
+      numTests: prompts.reduce(
+        (acc, p) =>
+          acc +
+          (p.metrics?.testPassCount || 0) +
+          (p.metrics?.testFailCount || 0) +
+          (p.metrics?.testErrorCount || 0),
+        0,
+      ),
       numVars: varNames.size,
       numProviders: testSuite.providers.length,
       numRepeat: options.repeat || 1,
@@ -874,19 +974,24 @@ class Evaluator {
           }),
         ),
       ).sort(),
-      assertionTypes: Array.from(
-        new Set(tests.flatMap((t) => t.assert || []).map((a) => a.type)),
-      ).sort(),
+      assertionTypes: Array.from(assertionTypes).sort(),
       eventSource: options.eventSource || 'default',
       ci: isCI(),
-      hasAnyPass: this.evalRecord.results.some((r) => r.success),
-      isRedteam: Boolean(testSuite.redteam),
+      hasAnyPass: this.evalRecord.prompts.some(
+        (p) => p.metrics?.testPassCount && p.metrics.testPassCount > 0,
+      ),
+      // FIXME(ian): Does this work?  I think redteam is only on the config, not testSuite.
+      // isRedteam: Boolean(testSuite.redteam),
     });
     return this.evalRecord;
   }
 }
 
-export function evaluate(testSuite: TestSuite, evalRecord: Eval, options: EvaluateOptions) {
+export function evaluate(
+  testSuite: TestSuite,
+  evalRecord: Eval,
+  options: EvaluateOptions,
+): Promise<Eval> {
   const ev = new Evaluator(testSuite, evalRecord, options);
   return ev.evaluate();
 }

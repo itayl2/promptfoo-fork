@@ -1,17 +1,33 @@
 import React from 'react';
 import Link from '@docusaurus/Link';
-import { Typography, Grid, Box, Container, Avatar, Divider } from '@mui/material';
+import { useColorMode } from '@docusaurus/theme-common';
+import Avatar from '@mui/material/Avatar';
+import Box from '@mui/material/Box';
+import Container from '@mui/material/Container';
+import Divider from '@mui/material/Divider';
+import Grid from '@mui/material/Grid';
+import Typography from '@mui/material/Typography';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 import Layout from '@theme/Layout';
 
-const AboutPage = () => {
+const AboutPageContent = () => {
+  const { colorMode } = useColorMode();
+
+  const theme = React.useMemo(
+    () =>
+      createTheme({
+        palette: {
+          mode: colorMode === 'dark' ? 'dark' : 'light',
+        },
+      }),
+    [colorMode],
+  );
+
   return (
-    <Layout
-      title="About Promptfoo | AI Security Experts"
-      description="Learn about Promptfoo's mission to secure AI applications and our team of industry veterans."
-    >
+    <ThemeProvider theme={theme}>
       <Container maxWidth="lg">
         <Box py={8}>
-          <Typography variant="h1" component="h1" align="center" gutterBottom fontWeight="bold">
+          <Typography variant="h2" component="h2" align="center" gutterBottom fontWeight="bold">
             Securing the Future of AI
           </Typography>
           <Typography variant="h5" component="h2" align="center" color="text.secondary" paragraph>
@@ -26,7 +42,7 @@ const AboutPage = () => {
                 About Us
               </Typography>
               <Typography variant="body1" paragraph>
-                We are security and engineering practioners who have scaled generative AI products
+                We are security and engineering practitioners who have scaled generative AI products
                 100s of millions of users. We're building the tools that we wished we had when we
                 were on the front lines.
               </Typography>
@@ -71,10 +87,16 @@ const AboutPage = () => {
                 name: 'Steve Klein',
                 title: 'Staff Engineer',
                 image: '/img/team/steve.jpeg',
-                bio: 'Steve brings decades of experience in engineering, product development, and security. Most recently, he scaled AI products at Discord.',
+                bio: `Steve brings decades of expertise in engineering, product, and cybersecurity. He has led technical and product teams, and conducted pentests at companies like Microsoft, Shopify, Intercom, and PwC. Most recently he was scaling AI products at Discord.`,
+              },
+              {
+                name: 'Vanessa Sauter',
+                title: 'Principal Solutions Architect',
+                image: '/img/team/vanessa.jpeg',
+                bio: 'Vanessa led hundreds of security and privacy reviews for customers at Gong. She has also pentested dozens of enterprises and launched hundreds of bug bounty programs for a leading crowdsourced security company and is published in Forbes, Lawfare, and Dark Reading.',
               },
             ].map((leader) => (
-              <Grid item xs={12} sm={6} md={4} key={leader.name}>
+              <Grid item xs={12} sm={6} md={3} key={leader.name}>
                 <Box textAlign="center">
                   <Avatar
                     alt={leader.name}
@@ -150,7 +172,9 @@ const AboutPage = () => {
                   <Typography
                     variant="body2"
                     color="text.secondary"
-                    sx={{ whiteSpace: 'pre-line' }}
+                    sx={{
+                      whiteSpace: 'pre-line',
+                    }}
                   >
                     {investor.description}
                   </Typography>
@@ -192,6 +216,17 @@ const AboutPage = () => {
           </Link>
         </Box>
       </Container>
+    </ThemeProvider>
+  );
+};
+
+const AboutPage = () => {
+  return (
+    <Layout
+      title="About Promptfoo | AI Security Experts"
+      description="Learn about Promptfoo's mission to secure AI applications and our team of industry veterans."
+    >
+      <AboutPageContent />
     </Layout>
   );
 };

@@ -7,9 +7,8 @@ import { globSync } from 'glob';
 import yaml from 'js-yaml';
 import * as path from 'path';
 import { parse as parsePath } from 'path';
-import invariant from 'tiny-invariant';
 import { testCaseFromCsvRow } from './csv';
-import { getEnvBool } from './envars';
+import { getEnvBool, getEnvString } from './envars';
 import { fetchCsvFromGoogleSheet } from './googleSheets';
 import logger from './logger';
 import { loadApiProvider } from './providers';
@@ -26,6 +25,7 @@ import type {
   ProviderOptions,
 } from './types';
 import { retryWithDeduplication, sampleArray } from './util/generation';
+import invariant from './util/invariant';
 import { extractJsonObjects } from './util/json';
 import { extractVariablesFromTemplates } from './util/templates';
 
@@ -57,7 +57,6 @@ export async function readVarsFiles(
       Object.assign(ret, yamlData);
     }
   }
-
   return ret;
 }
 
@@ -80,7 +79,12 @@ export async function readStandaloneTestsFile(
     telemetry.recordAndSendOnce('feature_used', {
       feature: 'csv tests file - local',
     });
-    rows = parseCsv(fs.readFileSync(resolvedVarsPath, 'utf-8'), { columns: true });
+    const delimiter = getEnvString('PROMPTFOO_CSV_DELIMITER', ',');
+    rows = parseCsv(fs.readFileSync(resolvedVarsPath, 'utf-8'), {
+      columns: true,
+      bom: true,
+      delimiter,
+    });
   } else if (fileExtension === 'json') {
     telemetry.recordAndSendOnce('feature_used', {
       feature: 'json tests file',
@@ -95,7 +99,7 @@ export async function readStandaloneTestsFile(
 
   return rows.map((row, idx) => {
     const test = testCaseFromCsvRow(row);
-    test.description = `Row #${idx + 1}`;
+    test.description ||= `Row #${idx + 1}`;
     return test;
   });
 }
@@ -140,10 +144,19 @@ export async function readTest(
     }
   }
 
-  // Validate the shape of the test case
-  if (!testCase.assert && !testCase.vars && !testCase.options && !testCase.metadata) {
+  if (
+    !testCase.assert &&
+    !testCase.vars &&
+    !testCase.options &&
+    !testCase.metadata &&
+    !testCase.provider &&
+    !testCase.providerOutput &&
+    typeof testCase.threshold !== 'number'
+  ) {
+    // Validate the shape of the test case
+    // We skip validation when loading the default test case, since it may not have all the properties
     throw new Error(
-      `Test case must have either assert, vars, options, or metadata property. Instead got ${JSON.stringify(
+      `Test case must contain one of the following properties: assert, vars, options, metadata, provider, providerOutput, threshold.\n\nInstead got:\n${JSON.stringify(
         testCase,
         null,
         2,
@@ -168,6 +181,11 @@ export async function readTests(
     const testFiles = globSync(resolvedPath, {
       windowsPathsNoEscape: true,
     });
+
+    if (loadTestsGlob.startsWith('https://docs.google.com/spreadsheets/')) {
+      testFiles.push(loadTestsGlob);
+    }
+
     const _deref = async (testCases: TestCase[], file: string) => {
       logger.debug(`Dereferencing test file: ${file}`);
       return (await $RefParser.dereference(testCases)) as TestCase[];
@@ -180,7 +198,10 @@ export async function readTests(
     }
     for (const testFile of testFiles) {
       let testCases: TestCase[] | undefined;
-      if (testFile.endsWith('.csv')) {
+      if (
+        testFile.endsWith('.csv') ||
+        testFile.startsWith('https://docs.google.com/spreadsheets/')
+      ) {
         testCases = await readStandaloneTestsFile(testFile, basePath);
       } else if (testFile.endsWith('.yaml') || testFile.endsWith('.yml')) {
         testCases = yaml.load(fs.readFileSync(testFile, 'utf-8')) as TestCase[];
@@ -222,6 +243,14 @@ export async function readTests(
         ret.push(await readTest(globOrTest, basePath));
       }
     }
+  } else if (tests !== undefined && tests !== null) {
+    logger.warn(dedent`
+      Warning: Unsupported 'tests' format in promptfooconfig.yaml.
+      Expected: string, string[], or TestCase[], but received: ${typeof tests}
+
+      Please check your configuration file and ensure the 'tests' field is correctly formatted.
+      For more information, visit: https://promptfoo.dev/docs/configuration/reference/#test-case
+    `);
   }
 
   if (

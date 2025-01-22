@@ -36,7 +36,7 @@ Edit `promptfooconfig.yaml` to specify the models to compare:
 providers:
   - id: cohere:command-r # or command-r-plus
   - id: openai:gpt-4o
-  - id: anthropic:messages:claude-3-5-sonnet-20240620
+  - id: anthropic:messages:claude-3-5-sonnet-20241022
 ```
 
 Set the API keys:
@@ -57,7 +57,7 @@ providers:
   - id: openai:gpt-4o
     config:
       temperature: 0
-  - id: anthropic:messages:claude-3-5-sonnet-20240620
+  - id: anthropic:messages:claude-3-5-sonnet-20241022
     config:
       temperature: 0
 ```
@@ -81,7 +81,7 @@ prompts:
 
 ## Step 4: Add test cases
 
-Provide test case inputs and expected outputs to evaluate performance:
+Provide test case inputs and assertions to evaluate performance:
 
 ```yaml
 tests:

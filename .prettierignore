@@ -6,7 +6,9 @@ site/static/config-schema.json
 
 site/.docusaurus
 site/build
-
+helm/chart/promptfoo/templates/**/*.yaml
+examples/adaline-chat-history/prompt.json
+examples/adaline-embedding-similarity/prompt.json
 examples/multiple-turn-conversation/prompt.json
 examples/openai-chat-history/prompt.json
 examples/simple-test/output.html

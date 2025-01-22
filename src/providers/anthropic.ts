@@ -2,7 +2,8 @@ import Anthropic, { APIError } from '@anthropic-ai/sdk';
 import { getCache, isCacheEnabled } from '../cache';
 import { getEnvString, getEnvFloat, getEnvInt } from '../envars';
 import logger from '../logger';
-import type { ApiProvider, EnvOverrides, ProviderResponse, TokenUsage } from '../types';
+import type { ApiProvider, ProviderResponse, TokenUsage } from '../types';
+import type { EnvOverrides } from '../types/env';
 import { maybeLoadFromExternalFile } from '../util';
 import { calculateCost } from './shared';
 
@@ -35,21 +36,26 @@ const ANTHROPIC_MODELS = [
       output: 0.00125 / 1000,
     },
   })),
-  ...['claude-3-sonnet-20240229'].map((model) => ({
-    id: model,
-    cost: {
-      input: 0.003 / 1000,
-      output: 0.015 / 1000,
-    },
-  })),
-  ...['claude-3-opus-20240229'].map((model) => ({
+  ...['claude-3-opus-20240229', 'claude-3-opus-latest'].map((model) => ({
     id: model,
     cost: {
       input: 0.015 / 1000,
       output: 0.075 / 1000,
     },
   })),
-  ...['claude-3-5-sonnet-20240620'].map((model) => ({
+  ...['claude-3-5-haiku-20241022', 'claude-3-5-haiku-latest'].map((model) => ({
+    id: model,
+    cost: {
+      input: 1 / 1e6,
+      output: 5 / 1e6,
+    },
+  })),
+  ...[
+    'claude-3-sonnet-20240229',
+    'claude-3-5-sonnet-20240620',
+    'claude-3-5-sonnet-20241022',
+    'claude-3-5-sonnet-latest',
+  ].map((model) => ({
     id: model,
     cost: {
       input: 3 / 1e6,
@@ -114,6 +120,29 @@ export function parseMessages(messages: string): {
   system?: Anthropic.TextBlockParam[];
   extractedMessages: Anthropic.MessageParam[];
 } {
+  try {
+    const parsed = JSON.parse(messages);
+    if (Array.isArray(parsed)) {
+      const systemMessage = parsed.find((msg) => msg.role === 'system');
+      return {
+        extractedMessages: parsed
+          .filter((msg) => msg.role !== 'system')
+          .map((msg) => ({
+            role: msg.role,
+            content: Array.isArray(msg.content)
+              ? msg.content
+              : [{ type: 'text', text: msg.content }],
+          })),
+        system: systemMessage
+          ? Array.isArray(systemMessage.content)
+            ? systemMessage.content
+            : [{ type: 'text', text: systemMessage.content }]
+          : undefined,
+      };
+    }
+  } catch {
+    // Not JSON, parse as plain text
+  }
   const lines = messages
     .split('\n')
     .map((line) => line.trim())
@@ -203,6 +232,14 @@ export class AnthropicMessagesProvider implements ApiProvider {
 
   toString(): string {
     return `[Anthropic Messages Provider ${this.modelName || 'claude-2.1'}]`;
+  }
+
+  getApiKey(): string | undefined {
+    return this.apiKey;
+  }
+
+  getApiBaseUrl(): string | undefined {
+    return this.config.apiBaseUrl;
   }
 
   async callApi(prompt: string): Promise<ProviderResponse> {

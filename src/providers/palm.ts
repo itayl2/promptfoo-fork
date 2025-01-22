@@ -1,14 +1,12 @@
 import { fetchWithCache } from '../cache';
 import { getEnvString } from '../envars';
 import logger from '../logger';
-import type {
-  ApiProvider,
-  CallApiContextParams,
-  CallApiOptionsParams,
-  EnvOverrides,
-  ProviderResponse,
-} from '../types';
+import type { ApiProvider, ProviderResponse, CallApiContextParams, CallApiOptionsParams } from '../types';
+import type { EnvOverrides } from '../types/env';
+import { maybeLoadFromExternalFile, renderVarsInObject } from '../util';
+import { CHAT_MODELS } from './googleShared';
 import { parseChatPrompt, REQUEST_TIMEOUT_MS } from './shared';
+import { maybeCoerceToGeminiFormat } from './vertexUtil';
 import type { LLMFile } from '../types/motion';
 
 const DEFAULT_API_HOST = 'generativelanguage.googleapis.com';
@@ -23,6 +21,7 @@ interface PalmCompletionOptions {
   topP?: number;
   topK?: number;
   generationConfig?: Record<string, any>;
+  responseSchema?: string;
 }
 
 type Part = {
@@ -97,21 +96,12 @@ class PalmGenericProvider implements ApiProvider {
 }
 
 export class PalmChatProvider extends PalmGenericProvider {
-  static CHAT_MODELS = [
-    'chat-bison-001',
-    'gemini-pro',
-    'gemini-pro-vision',
-    'gemini-1.5-pro',
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-8b',
-  ];
-
   constructor(
     modelName: string,
     options: { config?: PalmCompletionOptions; id?: string; env?: EnvOverrides } = {},
   ) {
-    if (!PalmChatProvider.CHAT_MODELS.includes(modelName)) {
-      logger.warn(`Using unknown Google chat model: ${modelName}`);
+    if (!CHAT_MODELS.includes(modelName)) {
+      logger.debug(`Using unknown Google chat model: ${modelName}`);
     }
     super(modelName, options);
   }
@@ -130,7 +120,7 @@ export class PalmChatProvider extends PalmGenericProvider {
 
     const isGemini = this.modelName.startsWith('gemini');
     if (isGemini) {
-      return this.callGemini(prompt, llmFile);
+      return this.callGemini(prompt, context, llmFile);
     }
 
     // https://developers.generativeai.google/tutorials/curl_quickstart
@@ -197,7 +187,7 @@ export class PalmChatProvider extends PalmGenericProvider {
     }
   }
 
-  async callGemini(prompt: string, llmFile?: LLMFile): Promise<ProviderResponse> {
+  async callGemini(prompt: string, context?: CallApiContextParams, llmFile?: LLMFile): Promise<ProviderResponse> {
     const geminiFiles = llmFile ? [{
       fileData: {
         fileUri: llmFile.url,
@@ -236,7 +226,6 @@ export class PalmChatProvider extends PalmGenericProvider {
     const contents = parseChatPrompt(prompt, contentsDefaultValue);
     const body = {
       contents,
-      systemInstruction,
       generationConfig: {
         temperature: this.config.temperature,
         topP: this.config.topP,
@@ -246,7 +235,25 @@ export class PalmChatProvider extends PalmGenericProvider {
         ...this.config.generationConfig,
       },
       safetySettings: this.config.safetySettings,
+      ...(systemInstruction ? { system_instruction: systemInstruction } : {}),
     };
+
+    if (this.config.responseSchema) {
+      // If the `response_schema` has already been set by the client.
+      if (body.generationConfig.response_schema) {
+        throw new Error(
+          '`responseSchema` provided but `generationConfig.response_schema` already set.',
+        );
+      }
+
+      const schema = maybeLoadFromExternalFile(
+        renderVarsInObject(this.config.responseSchema, context?.vars),
+      );
+
+      body.generationConfig.response_schema = schema;
+      body.generationConfig.response_mime_type = 'application/json';
+    }
+
     logger.debug(`Calling Google API: ${JSON.stringify(body)}`);
 
     let data;

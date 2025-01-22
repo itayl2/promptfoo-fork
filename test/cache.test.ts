@@ -1,24 +1,21 @@
-import type { Response } from 'node-fetch';
-import fetch from 'node-fetch';
 import { fetchWithCache, disableCache, enableCache, clearCache } from '../src/cache';
 
-jest.mock('node-fetch');
-const mockedFetch = jest.mocked(fetch);
+const mockedFetch = jest.mocked(jest.fn());
+global.fetch = mockedFetch;
 
-const mockedFetchResponse = (ok: boolean, response: object) => {
+const mockedFetchResponse = (ok: boolean, response: object): Response => {
+  const responseText = JSON.stringify(response);
   return {
     ok,
-    status: 200,
-    text: () => Promise.resolve(JSON.stringify(response)),
-    headers: {
-      get: (name: string) => {
-        if (name === 'content-type') {
-          return 'application/json';
-        }
-        return null;
-      },
-    },
-  } as unknown as Response;
+    status: ok ? 200 : 400,
+    statusText: ok ? 'OK' : 'Bad Request',
+    text: () => Promise.resolve(responseText),
+    json: () => Promise.resolve(response),
+    headers: new Headers({
+      'content-type': 'application/json',
+      'x-session-id': '45',
+    }),
+  } as Response;
 };
 
 describe('fetchWithCache', () => {
@@ -37,21 +34,36 @@ describe('fetchWithCache', () => {
     const result = await fetchWithCache(url, {}, 1000);
 
     expect(mockedFetch).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ cached: false, data: response });
+
+    expect(result).toEqual({
+      cached: false,
+      data: response,
+      headers: { 'content-type': 'application/json', 'x-session-id': '45' },
+      status: 400,
+      statusText: 'Bad Request',
+    });
   });
 
   it('should fetch data with cache enabled', async () => {
     enableCache();
 
     const url = 'https://api.example.com/data';
-    const response = { data: 'test data' };
+    const response = {
+      data: 'test data',
+    };
 
     mockedFetch.mockResolvedValueOnce(mockedFetchResponse(true, response));
 
     const result = await fetchWithCache(url, {}, 1000);
 
     expect(mockedFetch).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ cached: false, data: response });
+    expect(result).toEqual({
+      cached: false,
+      data: response,
+      status: 200,
+      statusText: 'OK',
+      headers: { 'x-session-id': '45', 'content-type': 'application/json' },
+    });
   });
 
   it('should fetch data with cache enabled after previous test', async () => {
@@ -63,7 +75,13 @@ describe('fetchWithCache', () => {
     const result = await fetchWithCache(url, {}, 1000);
 
     expect(mockedFetch).toHaveBeenCalledTimes(0);
-    expect(result).toEqual({ cached: true, data: response });
+    expect(result).toEqual({
+      cached: true,
+      data: response,
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'application/json', 'x-session-id': '45' },
+    });
   });
 
   it('should only fetch data once with cache enabled', async () => {
@@ -82,8 +100,20 @@ describe('fetchWithCache', () => {
     ]);
 
     expect(mockedFetch).toHaveBeenCalledTimes(1);
-    expect(a).toEqual({ cached: false, data: response });
-    expect(b).toEqual({ cached: true, data: response });
+    expect(a).toEqual({
+      cached: false,
+      data: response,
+      status: 200,
+      statusText: 'OK',
+      headers: { 'x-session-id': '45', 'content-type': 'application/json' },
+    });
+    expect(b).toEqual({
+      cached: true,
+      data: response,
+      status: 200,
+      statusText: 'OK',
+      headers: { 'x-session-id': '45', 'content-type': 'application/json' },
+    });
   });
 
   it('should fetch data without cache for a single test', async () => {
@@ -97,7 +127,13 @@ describe('fetchWithCache', () => {
     const result = await fetchWithCache(url, {}, 1000);
 
     expect(mockedFetch).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ cached: false, data: response });
+    expect(result).toEqual({
+      cached: false,
+      data: response,
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'application/json', 'x-session-id': '45' },
+    });
 
     enableCache();
   });
@@ -113,7 +149,13 @@ describe('fetchWithCache', () => {
     const result = await fetchWithCache(url, {}, 1000);
 
     expect(mockedFetch).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ cached: false, data: response });
+    expect(result).toEqual({
+      cached: false,
+      data: response,
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'application/json', 'x-session-id': '45' },
+    });
 
     enableCache();
   });

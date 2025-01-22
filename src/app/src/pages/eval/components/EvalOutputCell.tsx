@@ -1,8 +1,9 @@
 import * as React from 'react';
+import { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useShiftKey } from '@app/hooks/useShiftKey';
 import Tooltip from '@mui/material/Tooltip';
-import type { EvaluateTableOutput } from '@promptfoo/types';
+import { ResultFailureReason, type EvaluateTableOutput } from '@promptfoo/types';
 import { diffSentences, diffJson, diffWords } from 'diff';
 import remarkGfm from 'remark-gfm';
 import CustomMetrics from './CustomMetrics';
@@ -12,6 +13,10 @@ import CommentDialog from './TableCommentDialog';
 import TruncatedText from './TruncatedText';
 import { useStore as useResultsViewStore } from './store';
 
+type CSSPropertiesWithCustomVars = React.CSSProperties & {
+  [key: `--${string}`]: string | number;
+};
+
 function scoreToString(score: number | null) {
   if (score === null || score === 0 || score === 1) {
     // Don't show boolean scores.
@@ -20,7 +25,7 @@ function scoreToString(score: number | null) {
   return `(${score.toFixed(2)})`;
 }
 
-interface EvalOutputCellProps {
+export interface EvalOutputCellProps {
   output: EvaluateTableOutput;
   maxTextLength: number;
   rowIndex: number;
@@ -44,7 +49,8 @@ function EvalOutputCell({
   showDiffs: boolean;
   searchText: string;
 }) {
-  const { renderMarkdown, prettifyJson, showPrompts, showPassFail } = useResultsViewStore();
+  const { renderMarkdown, prettifyJson, showPrompts, showPassFail, maxImageWidth, maxImageHeight } =
+    useResultsViewStore();
   const [openPrompt, setOpen] = React.useState(false);
   const handlePromptOpen = () => {
     setOpen(true);
@@ -180,6 +186,17 @@ function EvalOutputCell({
     } catch (error) {
       console.error('Invalid regular expression:', (error as Error).message);
     }
+  } else if (
+    text.match(/^data:(image\/[a-z]+|application\/octet-stream|image\/svg\+xml);(base64,)?/)
+  ) {
+    node = (
+      <img
+        src={text}
+        alt={output.prompt}
+        style={{ width: '100%' }}
+        onClick={() => toggleLightbox(text)}
+      />
+    );
   } else if (renderMarkdown && !showDiffs) {
     node = (
       <ReactMarkdown
@@ -256,24 +273,24 @@ function EvalOutputCell({
     costDisplay = <span>${output.cost.toPrecision(2)}</span>;
   }
 
-  if (output.tokenUsage?.cached) {
+  if (output.response?.tokenUsage?.cached) {
     tokenUsageDisplay = (
       <span>
         {Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(
-          output.tokenUsage.cached,
+          output.response?.tokenUsage?.cached ?? 0,
         )}{' '}
         (cached)
       </span>
     );
-  } else if (output.tokenUsage?.total) {
+  } else if (output.response?.tokenUsage?.total) {
     const promptTokens = Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(
-      output.tokenUsage.prompt ?? 0,
+      output.response?.tokenUsage?.prompt ?? 0,
     );
     const completionTokens = Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(
-      output.tokenUsage.completion ?? 0,
+      output.response?.tokenUsage?.completion ?? 0,
     );
     const totalTokens = Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(
-      output.tokenUsage.total,
+      output.response?.tokenUsage?.total ?? 0,
     );
 
     tokenUsageDisplay = (
@@ -383,14 +400,21 @@ function EvalOutputCell({
     </div>
   );
 
-  const cellStyle: Record<string, string> = {};
-  if (output.gradingResult?.comment === '!highlight') {
-    cellStyle.backgroundColor = '#ffffeb';
-  }
+  const cellStyle = useMemo(() => {
+    const base =
+      output.gradingResult?.comment === '!highlight' ? { backgroundColor: '#ffffeb' } : {};
+
+    return {
+      ...base,
+      '--max-image-width': `${maxImageWidth}px`,
+      '--max-image-height': `${maxImageHeight}px`,
+    } as CSSPropertiesWithCustomVars;
+  }, [output.gradingResult?.comment, maxImageWidth, maxImageHeight]);
 
   // Pass/fail badge creation
   let passCount = 0;
   let failCount = 0;
+  let errorCount = 0;
   const gradingResult = output.gradingResult;
 
   if (gradingResult) {
@@ -412,8 +436,14 @@ function EvalOutputCell({
     failCount = 1;
   }
 
+  if (output.failureReason === ResultFailureReason.ERROR) {
+    errorCount = 1;
+  }
+
   let passFailText;
-  if (failCount === 1 && passCount === 1) {
+  if (errorCount === 1) {
+    passFailText = 'ERROR';
+  } else if (failCount === 1 && passCount === 1) {
     passFailText = (
       <>
         {`${failCount} FAIL`} {`${passCount} PASS`}
@@ -445,6 +475,21 @@ function EvalOutputCell({
   }
 
   const scoreString = scoreToString(output.score);
+
+  const getCombinedContextText = () => {
+    if (!output.gradingResult?.componentResults) {
+      return output.text;
+    }
+
+    return output.gradingResult.componentResults
+      .map((result, index) => {
+        const displayName = result.assertion?.metric || result.assertion?.type || 'unknown';
+        const value = result.assertion?.value || '';
+        return `Assertion ${index + 1} (${displayName}): ${value}`;
+      })
+      .join('\n\n');
+  };
+
   return (
     <div className="cell" style={cellStyle}>
       {showPassFail && (
@@ -492,7 +537,7 @@ function EvalOutputCell({
       )}
       <CommentDialog
         open={commentDialogOpen}
-        contextText={output.text}
+        contextText={getCombinedContextText()}
         commentText={commentText}
         onClose={handleCommentClose}
         onSave={handleCommentSave}

@@ -40,10 +40,12 @@ export ANTHROPIC_API_KEY=your_api_key_here
 
 The `anthropic` provider supports the following models via the messages API:
 
+- `anthropic:messages:claude-3-5-sonnet-20241022`
 - `anthropic:messages:claude-3-5-sonnet-20240620`
-- `anthropic:messages:claude-3-haiku-20240307`
-- `anthropic:messages:claude-3-sonnet-20240229`
+- `anthropic:messages:claude-3-5-haiku-20241022`
 - `anthropic:messages:claude-3-opus-20240229`
+- `anthropic:messages:claude-3-sonnet-20240229`
+- `anthropic:messages:claude-3-haiku-20240307`
 - `anthropic:messages:claude-2.0`
 - `anthropic:messages:claude-2.1`
 - `anthropic:messages:claude-instant-1.2`
@@ -88,7 +90,7 @@ Example configuration with options and prompts:
 
 ```yaml
 providers:
-  - id: anthropic:messages:claude-3-5-sonnet-20240620
+  - id: anthropic:messages:claude-3-5-sonnet-20241022
     config:
       temperature: 0.0
       max_tokens: 512
@@ -102,7 +104,7 @@ The Anthropic provider supports tool use (or function calling). Here's an exampl
 
 ```yaml
 providers:
-  - id: anthropic:messages:claude-3-5-sonnet-20240620
+  - id: anthropic:messages:claude-3-5-sonnet-20241022
     config:
       tools:
         - name: get_weather
@@ -182,7 +184,7 @@ The easiest way to do this for _all_ your test cases is to add the [`defaultTest
 defaultTest:
   options:
     provider:
-      id: anthropic:messages:claude-3-5-sonnet-20240620
+      id: anthropic:messages:claude-3-5-sonnet-20241022
       config:
         # optional provider config options
 ```
@@ -195,7 +197,7 @@ assert:
   - type: llm-rubric
     value: Do not mention that you are an AI or chat assistant
     provider:
-      id: anthropic:messages:claude-3-5-sonnet-20240620
+      id: anthropic:messages:claude-3-5-sonnet-20241022
       config:
         # optional provider config options
 ```
@@ -209,7 +211,7 @@ tests:
       # ...
     options:
       provider:
-        id: anthropic:messages:claude-3-5-sonnet-20240620
+        id: anthropic:messages:claude-3-5-sonnet-20241022
         config:
           # optional provider config options
     assert:

@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
 description: 'Websocket test'
 
 prompts:
@@ -8,7 +9,7 @@ providers:
   - id: 'ws://localhost:4000'
     config:
       messageTemplate: '{"prompt": "{{prompt}}", "model": "{{model}}"}'
-      responseParser: 'data.output'
+      transformResponse: 'data.output'
 
 tests:
   - vars:

@@ -123,8 +123,8 @@ table.results-table,
 }
 
 .results-table tr .cell img {
-  max-width: 256px;
-  max-height: 256px;
+  max-width: var(--max-image-width, 256px);
+  max-height: var(--max-image-height, 256px);
   cursor: zoom-in;
 }
 
@@ -165,7 +165,8 @@ table.results-table,
   font-size: 1.25rem;
 }
 
-.results-table tr:hover .cell-actions {
+.results-table .first-prompt-col:hover .cell-actions,
+.results-table .second-prompt-column:hover .cell-actions {
   visibility: visible;
 }
 
@@ -392,4 +393,119 @@ table.results-table,
   *:hover > .resizer {
     opacity: 1;
   }
+}
+
+.results-table thead.sticky {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  transition: transform 0.2s ease-out;
+}
+
+[data-theme='dark'] .results-table thead.sticky {
+  background: #1a1a1a;
+}
+
+.header-dismiss {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  cursor: pointer;
+  z-index: 101;
+  padding: 4px;
+  border-radius: 4px;
+  background: #eee;
+  display: none;
+}
+
+[data-theme='dark'] .header-dismiss {
+  background: #333;
+}
+
+.header-dismiss:hover {
+  background: #ddd;
+}
+
+[data-theme='dark'] .header-dismiss:hover {
+  background: #444;
+}
+
+thead.collapsed .header-dismiss {
+  display: block;
+}
+
+.results-table thead.collapsed .prompt-detail,
+.results-table thead.collapsed .custom-metric-container {
+  display: none;
+}
+
+.results-table thead.collapsed .MuiFormControlLabel-root {
+  margin-top: -8px;
+}
+
+/* Ensure the header cells have a solid background */
+.results-table th {
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* Add these additional styles */
+.results-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.results-table thead.collapsed th {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+/* Ensure content below header doesn't jump when header collapses */
+.results-table thead th {
+  transition: padding 0.2s ease-out;
+}
+
+/* Add a subtle transition for the collapse animation */
+.results-table thead .output-header {
+  transition: max-height 0.2s ease-out;
+}
+
+/* Update these styles */
+.results-table thead.collapsed {
+  border-bottom: 2px solid var(--border-color);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Ensure the header cells have a solid background */
+.results-table th {
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] .results-table th {
+  background: #1a1a1a;
+}
+
+.lightbox {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  cursor: pointer;
+}
+
+.lightbox img {
+  max-width: 90%;
+  max-height: 90%;
+  object-fit: contain;
+}
+
+.error-pill {
+  cursor: pointer;
 }

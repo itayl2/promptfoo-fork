@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq, gte, lt } from 'drizzle-orm';
 import { getDb } from '../database';
 import { evalResultsTable } from '../database/tables';
 import { hashPrompt } from '../prompts/utils';
@@ -9,6 +9,7 @@ import type {
   Prompt,
   ProviderOptions,
   ProviderResponse,
+  ResultFailureReason,
 } from '../types';
 import { type EvaluateResult } from '../types';
 import { getCurrentTimestamp } from '../util/time';
@@ -21,8 +22,19 @@ export default class EvalResult {
     opts?: { persist: boolean },
   ) {
     const persist = opts?.persist == null ? true : opts.persist;
-    const { prompt, error, score, latencyMs, success, provider, gradingResult, namedScores, cost } =
-      result;
+    const {
+      prompt,
+      error,
+      score,
+      latencyMs,
+      success,
+      provider,
+      gradingResult,
+      namedScores,
+      cost,
+      metadata,
+      failureReason,
+    } = result;
     const args = {
       id: randomUUID(),
       evalId,
@@ -40,6 +52,8 @@ export default class EvalResult {
       provider,
       latencyMs,
       cost,
+      metadata,
+      failureReason,
     };
     if (persist) {
       const db = getDb();
@@ -71,13 +85,52 @@ export default class EvalResult {
     return result.length > 0 ? new EvalResult({ ...result[0], persisted: true }) : null;
   }
 
-  static async findManyByEvalId(evalId: string) {
+  static async findManyByEvalId(evalId: string, opts?: { testIdx?: number }) {
     const db = getDb();
     const results = await db
       .select()
       .from(evalResultsTable)
-      .where(eq(evalResultsTable.evalId, evalId));
+      .where(
+        and(
+          eq(evalResultsTable.evalId, evalId),
+          opts?.testIdx == null ? undefined : eq(evalResultsTable.testIdx, opts.testIdx),
+        ),
+      );
     return results.map((result) => new EvalResult({ ...result, persisted: true }));
+  }
+
+  // This is a generator that yields batches of results from the database
+  // These are batched by test Id, not just results to ensure we get all results for a given test
+  static async *findManyByEvalIdBatched(
+    evalId: string,
+    opts?: {
+      batchSize?: number;
+    },
+  ): AsyncGenerator<EvalResult[]> {
+    const db = getDb();
+    const batchSize = opts?.batchSize || 100;
+    let offset = 0;
+
+    while (true) {
+      const results = await db
+        .select()
+        .from(evalResultsTable)
+        .where(
+          and(
+            eq(evalResultsTable.evalId, evalId),
+            gte(evalResultsTable.testIdx, offset),
+            lt(evalResultsTable.testIdx, offset + batchSize),
+          ),
+        )
+        .all();
+
+      if (results.length === 0) {
+        break;
+      }
+
+      yield results.map((result) => new EvalResult({ ...result, persisted: true }));
+      offset += batchSize;
+    }
   }
 
   id: string;
@@ -91,12 +144,14 @@ export default class EvalResult {
   error?: string | null;
   success: boolean;
   score: number;
-  response: ProviderResponse | null;
+  response: ProviderResponse | undefined;
   gradingResult: GradingResult | null;
   namedScores: Record<string, number>;
   provider: ProviderOptions;
   latencyMs: number;
   cost: number;
+  metadata: Record<string, any>;
+  failureReason: ResultFailureReason;
   persisted: boolean;
 
   constructor(opts: {
@@ -116,6 +171,8 @@ export default class EvalResult {
     provider: ProviderOptions;
     latencyMs?: number | null;
     cost?: number | null;
+    metadata?: Record<string, any> | null;
+    failureReason: ResultFailureReason;
     persisted?: boolean;
   }) {
     this.id = opts.id;
@@ -129,12 +186,14 @@ export default class EvalResult {
     this.error = opts.error;
     this.score = opts.score;
     this.success = opts.success;
-    this.response = opts.response;
+    this.response = opts.response || undefined;
     this.gradingResult = opts.gradingResult;
     this.namedScores = opts.namedScores || {};
     this.provider = opts.provider;
     this.latencyMs = opts.latencyMs || 0;
     this.cost = opts.cost || 0;
+    this.metadata = opts.metadata || {};
+    this.failureReason = opts.failureReason;
     this.persisted = opts.persisted || false;
   }
 
@@ -172,6 +231,8 @@ export default class EvalResult {
       testCase: this.testCase,
       testIdx: this.testIdx,
       vars: this.testCase.vars || {},
+      metadata: this.metadata,
+      failureReason: this.failureReason,
     };
   }
 }

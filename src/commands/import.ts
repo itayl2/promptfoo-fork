@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 import fs from 'fs';
 import { getDb } from '../database';
-import { evals } from '../database/tables';
+import { evalsTable } from '../database/tables';
 import logger from '../logger';
 import Eval, { createEvalId } from '../models/eval';
 import EvalResult from '../models/evalResult';
@@ -20,6 +20,7 @@ export function importCommand(program: Command) {
         if (evalData.results.version === 3) {
           logger.debug('Importing v3 eval');
           const evalRecord = await Eval.create(evalData.config, evalData.results.prompts, {
+            id: evalData.id,
             createdAt: evalData.createdAt,
             author: evalData.author || 'Unknown',
           });
@@ -29,7 +30,7 @@ export function importCommand(program: Command) {
           logger.debug('Importing v2 eval');
           evalId = evalData.id || createEvalId(evalData.createdAt);
           await db
-            .insert(evals)
+            .insert(evalsTable)
             .values({
               id: evalId,
               createdAt: evalData.createdAt,

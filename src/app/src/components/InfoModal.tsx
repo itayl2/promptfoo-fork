@@ -1,18 +1,18 @@
+import React from 'react';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import ForumIcon from '@mui/icons-material/Forum';
 import GitHubIcon from '@mui/icons-material/GitHub';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
-import {
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Stack,
-  Link,
-  Typography,
-} from '@mui/material';
+import WorkIcon from '@mui/icons-material/Work';
+import Button from '@mui/material/Button';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
+import Link from '@mui/material/Link';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
 
 const links: { icon: React.ReactNode; text: string; href: string }[] = [
   {
@@ -40,6 +40,11 @@ const links: { icon: React.ReactNode; text: string; href: string }[] = [
     text: 'Book a Meeting',
     href: 'https://cal.com/team/promptfoo/intro2',
   },
+  {
+    icon: <WorkIcon fontSize="small" />,
+    text: 'Careers',
+    href: 'https://www.promptfoo.dev/careers/',
+  },
 ];
 
 export default function InfoModal<T extends { open: boolean; onClose: () => void }>({
@@ -65,15 +70,17 @@ export default function InfoModal<T extends { open: boolean; onClose: () => void
             }}
             target="_blank"
           >
-            <Typography variant="subtitle2">Version {import.meta.env.PROMPTFOO_VERSION}</Typography>
+            <Typography variant="subtitle2">
+              Version {import.meta.env.VITE_PROMPTFOO_VERSION}
+            </Typography>
           </Link>
         </Stack>
       </DialogTitle>
       <DialogContent>
         <Typography variant="body2" gutterBottom>
-          Promptfoo is a MIT licensed open-source tool for evaluating LLMs. We make it easy to track
-          the performance of your models and prompts over time with automated support for dataset
-          generation and grading.
+          Promptfoo is a MIT licensed open-source tool for evaluating and red-teaming LLMs. We make
+          it easy to track the performance of your models and prompts over time with automated
+          support for dataset generation and grading.
         </Typography>
         <Stack spacing={2} mt={2}>
           {links.map((item, index) => (

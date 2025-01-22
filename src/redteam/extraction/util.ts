@@ -1,12 +1,13 @@
 import dedent from 'dedent';
-import invariant from 'tiny-invariant';
 import { z } from 'zod';
 import { fetchWithCache } from '../../cache';
+import { VERSION } from '../../constants';
 import { getEnvBool } from '../../envars';
 import logger from '../../logger';
 import { REQUEST_TIMEOUT_MS } from '../../providers/shared';
 import type { ApiProvider } from '../../types';
-import { REMOTE_GENERATION_URL } from '../constants';
+import invariant from '../../util/invariant';
+import { getRemoteGenerationUrl } from '../remoteGeneration';
 
 export const RedTeamGenerationResponse = z.object({
   task: z.string(),
@@ -41,10 +42,11 @@ export async function fetchRemoteGeneration(
     const body = {
       task,
       prompts,
+      version: VERSION,
     };
 
     const response = await fetchWithCache(
-      REMOTE_GENERATION_URL,
+      getRemoteGenerationUrl(),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

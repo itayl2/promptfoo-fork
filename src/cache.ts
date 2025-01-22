@@ -2,11 +2,11 @@ import cacheManager from 'cache-manager';
 import type { Cache } from 'cache-manager';
 import fsStore from 'cache-manager-fs-hash';
 import fs from 'fs';
-import type { RequestInfo, RequestInit } from 'node-fetch';
 import path from 'path';
 import { getEnvBool, getEnvString, getEnvInt } from './envars';
 import { fetchWithRetries } from './fetch';
 import logger from './logger';
+import { REQUEST_TIMEOUT_MS } from './providers/shared';
 import { getConfigDirectoryPath } from './util/config/manage';
 
 let cacheInstance: Cache | undefined;
@@ -44,22 +44,29 @@ export function getCache() {
 export type FetchWithCacheResult<T> = {
   data: T;
   cached: boolean;
+  status: number;
+  statusText: string;
+  headers?: Record<string, string>;
 };
 
 export async function fetchWithCache<T = any>(
   url: RequestInfo,
   options: RequestInit = {},
-  timeout: number,
+  timeout: number = REQUEST_TIMEOUT_MS,
   format: 'json' | 'text' = 'json',
   bust: boolean = false,
 ): Promise<FetchWithCacheResult<T>> {
   if (!enabled || bust) {
     const resp = await fetchWithRetries(url, options, timeout);
+
     const respText = await resp.text();
     try {
       return {
         cached: false,
         data: format === 'json' ? JSON.parse(respText) : respText,
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: Object.fromEntries(resp.headers.entries()),
       };
     } catch {
       throw new Error(`Error parsing response as JSON: ${respText}`);
@@ -70,7 +77,7 @@ export async function fetchWithCache<T = any>(
 
   const copy = Object.assign({}, options);
   delete copy.headers;
-  const cacheKey = `fetch:${url}:${JSON.stringify(copy)}`;
+  const cacheKey = `fetch:v2:${url}:${JSON.stringify(copy)}`;
 
   let cached = true;
   let errorResponse = null;
@@ -81,10 +88,26 @@ export async function fetchWithCache<T = any>(
     cached = false;
     const response = await fetchWithRetries(url, options, timeout);
     const responseText = await response.text();
+    const headers = Object.fromEntries(response.headers.entries());
+
     try {
-      const data = JSON.stringify(format === 'json' ? JSON.parse(responseText) : responseText);
+      const data = JSON.stringify({
+        data: format === 'json' ? JSON.parse(responseText) : responseText,
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
       if (!response.ok) {
-        errorResponse = data;
+        if (responseText == '') {
+          errorResponse = JSON.stringify({
+            data: `Empty Response: ${response.status}: ${response.statusText}`,
+            status: response.status,
+            statusText: response.statusText,
+            headers,
+          });
+        } else {
+          errorResponse = data;
+        }
         // Don't cache error responses
         return;
       }
@@ -107,9 +130,13 @@ export async function fetchWithCache<T = any>(
     logger.debug(`Returning cached response for ${url}: ${cachedResponse}`);
   }
 
+  const parsedResponse = JSON.parse((cachedResponse ?? errorResponse) as string);
   return {
     cached,
-    data: JSON.parse((cachedResponse ?? errorResponse) as string) as T,
+    data: parsedResponse.data as T,
+    status: parsedResponse.status,
+    statusText: parsedResponse.statusText,
+    headers: parsedResponse.headers,
   };
 }
 

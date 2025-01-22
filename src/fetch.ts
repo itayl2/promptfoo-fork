@@ -1,18 +1,56 @@
-import fetch from 'node-fetch';
-import type { RequestInfo, RequestInit, Response } from 'node-fetch';
 import { ProxyAgent } from 'proxy-agent';
-import invariant from 'tiny-invariant';
+import { VERSION } from './constants';
 import { getEnvInt, getEnvBool } from './envars';
 import logger from './logger';
+import invariant from './util/invariant';
+import { sleep } from './util/time';
 
 export async function fetchWithProxy(
   url: RequestInfo,
   options: RequestInit = {},
 ): Promise<Response> {
-  options.agent = new ProxyAgent({
-    rejectUnauthorized: false, // Don't check SSL cert
-  }) as unknown as RequestInit['agent'];
-  return fetch(url, options);
+  let finalUrl = url;
+
+  const finalOptions = {
+    ...options,
+    headers: {
+      ...options.headers,
+      'x-promptfoo-version': VERSION,
+    } as Record<string, string>,
+  };
+
+  if (typeof url === 'string') {
+    try {
+      const parsedUrl = new URL(url);
+      if (parsedUrl.username || parsedUrl.password) {
+        if (finalOptions.headers && 'Authorization' in finalOptions.headers) {
+          logger.warn(
+            'Both URL credentials and Authorization header present - URL credentials will be ignored',
+          );
+        } else {
+          // Move credentials to Authorization header
+          const username = parsedUrl.username || '';
+          const password = parsedUrl.password || '';
+          const credentials = Buffer.from(`${username}:${password}`).toString('base64');
+          finalOptions.headers = {
+            ...finalOptions.headers,
+            Authorization: `Basic ${credentials}`,
+          };
+        }
+        parsedUrl.username = '';
+        parsedUrl.password = '';
+        finalUrl = parsedUrl.toString();
+      }
+    } catch (e) {
+      logger.debug(`URL parsing failed in fetchWithProxy: ${e}`);
+    }
+  }
+
+  const agent = new ProxyAgent({
+    rejectUnauthorized: false,
+  });
+
+  return fetch(finalUrl, { ...finalOptions, agent } as RequestInit);
 }
 
 export function fetchWithTimeout(
@@ -30,7 +68,7 @@ export function fetchWithTimeout(
 
     fetchWithProxy(url, {
       ...options,
-      signal: signal as never, // AbortSignal type is not exported by node-fetch 2.x
+      signal,
     })
       .then((response) => {
         clearTimeout(timeoutId);
@@ -43,21 +81,34 @@ export function fetchWithTimeout(
   });
 }
 
-function isRateLimited(response: Response): boolean {
+export function isRateLimited(response: Response): boolean {
   // These checks helps make sure we set up tests correctly.
   invariant(response.headers, 'Response headers are missing');
   invariant(response.status, 'Response status is missing');
 
-  return response.headers.get('X-RateLimit-Remaining') === '0' || response.status === 429;
+  // Check for OpenAI specific rate limit headers and status codes
+  return (
+    response.headers.get('X-RateLimit-Remaining') === '0' ||
+    response.status === 429 ||
+    // OpenAI specific error codes
+    response.headers.get('x-ratelimit-remaining-requests') === '0' ||
+    response.headers.get('x-ratelimit-remaining-tokens') === '0'
+  );
 }
 
-async function handleRateLimit(response: Response): Promise<void> {
+export async function handleRateLimit(response: Response): Promise<void> {
   const rateLimitReset = response.headers.get('X-RateLimit-Reset');
   const retryAfter = response.headers.get('Retry-After');
+  // OpenAI specific headers
+  const openaiReset =
+    response.headers.get('x-ratelimit-reset-requests') ||
+    response.headers.get('x-ratelimit-reset-tokens');
 
   let waitTime = 60_000; // Default wait time of 60 seconds
 
-  if (rateLimitReset) {
+  if (openaiReset) {
+    waitTime = Math.max(Number.parseInt(openaiReset) * 1000, 0);
+  } else if (rateLimitReset) {
     const resetTime = new Date(Number.parseInt(rateLimitReset) * 1000);
     const now = new Date();
     waitTime = Math.max(resetTime.getTime() - now.getTime() + 1000, 0);
@@ -65,7 +116,8 @@ async function handleRateLimit(response: Response): Promise<void> {
     waitTime = Number.parseInt(retryAfter) * 1000;
   }
 
-  await new Promise((resolve) => setTimeout(resolve, waitTime));
+  logger.debug(`Rate limited, waiting ${waitTime}ms before retry`);
+  await sleep(waitTime);
 }
 
 export async function fetchWithRetries(
@@ -96,9 +148,25 @@ export async function fetchWithRetries(
 
       return response;
     } catch (error) {
+      let errorMessage;
+      if (error instanceof Error) {
+        // Extract as much detail as possible from the error
+        errorMessage = `${error.name}: ${error.message}`;
+        if ('cause' in error) {
+          errorMessage += ` (Cause: ${error.cause})`;
+        }
+        if ('code' in error) {
+          // Node.js system errors often have error codes
+          errorMessage += ` (Code: ${error.code})`;
+        }
+      } else {
+        errorMessage = String(error);
+      }
+
+      logger.debug(`Request to ${url} failed (attempt #${i + 1}), retrying: ${errorMessage}`);
       lastError = error;
       const waitTime = Math.pow(2, i) * (backoff + 1000 * Math.random());
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
+      await sleep(waitTime);
     }
   }
   throw new Error(`Request failed after ${retries} retries: ${(lastError as Error).message}`);

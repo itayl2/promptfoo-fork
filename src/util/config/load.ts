@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { globSync } from 'glob';
 import yaml from 'js-yaml';
 import * as path from 'path';
-import invariant from 'tiny-invariant';
+import { fromError } from 'zod-validation-error';
 import { readAssertions } from '../../assertions';
 import { validateAssertions } from '../../assertions/validateAssertions';
 import cliState from '../../cliState';
@@ -15,19 +15,22 @@ import { readPrompts, readProviderPromptMap } from '../../prompts';
 import { loadApiProviders } from '../../providers';
 import telemetry from '../../telemetry';
 import { readTest, readTests } from '../../testCases';
-import type {
-  CommandLineOptions,
-  Prompt,
-  ProviderOptions,
-  RedteamPluginObject,
-  RedteamStrategyObject,
-  Scenario,
-  TestCase,
-  TestSuite,
-  UnifiedConfig,
+import {
+  UnifiedConfigSchema,
+  type CommandLineOptions,
+  type Prompt,
+  type ProviderOptions,
+  type RedteamPluginObject,
+  type RedteamStrategyObject,
+  type Scenario,
+  type TestCase,
+  type TestSuite,
+  type UnifiedConfig,
 } from '../../types';
 import { maybeLoadFromExternalFile, readFilters, setupEnv } from '../../util';
 import { isJavascriptFile } from '../../util/file';
+import invariant from '../../util/invariant';
+import { PromptSchema } from '../../validators/prompts';
 
 export async function dereferenceConfig(rawConfig: UnifiedConfig): Promise<UnifiedConfig> {
   if (getEnvBool('PROMPTFOO_DISABLE_REF_PARSER')) {
@@ -154,10 +157,28 @@ export async function readConfig(configPath: string): Promise<UnifiedConfig> {
     if (basePath) {
       contents = contents.replace(/BASE_PATH/g, basePath);
     }
-    const rawConfig = yaml.load(contents) as UnifiedConfig;
-    ret = await dereferenceConfig(rawConfig || {});
+    const rawConfig = yaml.load(contents);
+    const dereferencedConfig = await dereferenceConfig(rawConfig as UnifiedConfig);
+    // Validator requires `prompts`, but prompts is not actually required for redteam.
+    const UnifiedConfigSchemaWithoutPrompts = UnifiedConfigSchema.innerType()
+      .innerType()
+      .extend({ prompts: UnifiedConfigSchema.innerType().innerType().shape.prompts.optional() });
+    const validationResult = UnifiedConfigSchemaWithoutPrompts.safeParse(dereferencedConfig);
+    if (!validationResult.success) {
+      logger.warn(
+        `Invalid configuration file ${configPath}:\n${fromError(validationResult.error).message}`,
+      );
+    }
+    ret = dereferencedConfig;
   } else if (isJavascriptFile(configPath)) {
-    ret = (await importModule(configPath)) as UnifiedConfig;
+    const imported = await importModule(configPath);
+    const validationResult = UnifiedConfigSchema.safeParse(imported);
+    if (!validationResult.success) {
+      logger.warn(
+        `Invalid configuration file ${configPath}:\n${fromError(validationResult.error).message}`,
+      );
+    }
+    ret = imported as UnifiedConfig;
   } else {
     throw new Error(`Unsupported configuration file format: ${ext}`);
   }
@@ -274,13 +295,15 @@ export async function combineConfigs(configPaths: string[]): Promise<UnifiedConf
     );
   }
 
-  const redteam: UnifiedConfig['redteam'] = {
-    plugins: [],
-    strategies: [],
-  };
-
+  let redteam: UnifiedConfig['redteam'] | undefined;
   for (const config of configs) {
     if (config.redteam) {
+      if (!redteam) {
+        redteam = {
+          plugins: [],
+          strategies: [],
+        };
+      }
       for (const redteamKey of Object.keys(config.redteam) as Array<keyof typeof redteam>) {
         if (['entities', 'plugins', 'strategies'].includes(redteamKey)) {
           if (Array.isArray(config.redteam[redteamKey])) {
@@ -320,6 +343,8 @@ export async function combineConfigs(configPaths: string[]): Promise<UnifiedConf
           path.resolve(path.dirname(configPath), relativePath.id.slice('file://'.length));
       }
       return relativePath;
+    } else if (PromptSchema.safeParse(relativePath).success) {
+      return relativePath;
     } else {
       throw new Error(`Invalid prompt object: ${JSON.stringify(relativePath)}`);
     }
@@ -330,6 +355,8 @@ export async function combineConfigs(configPaths: string[]): Promise<UnifiedConf
     if (typeof prompt === 'string') {
       seenPrompts.add(prompt);
     } else if (typeof prompt === 'object' && prompt.id) {
+      seenPrompts.add(prompt);
+    } else if (PromptSchema.safeParse(prompt).success) {
       seenPrompts.add(prompt);
     } else {
       throw new Error('Invalid prompt object');
@@ -347,7 +374,7 @@ export async function combineConfigs(configPaths: string[]): Promise<UnifiedConf
           typeof prompt === 'string' ||
             (typeof prompt === 'object' &&
               (typeof prompt.raw === 'string' || typeof prompt.label === 'string')),
-          'Invalid prompt',
+          `Invalid prompt: ${JSON.stringify(prompt)}. Prompts must be either a string or an object with a 'raw' or 'label' string property.`,
         );
         addSeenPrompt(makeAbsolute(configPaths[idx], prompt as string | Prompt));
       });
@@ -410,13 +437,15 @@ export async function combineConfigs(configPaths: string[]): Promise<UnifiedConf
 
 export async function resolveConfigs(
   cmdObj: Partial<CommandLineOptions>,
-  defaultConfig: Partial<UnifiedConfig>,
+  _defaultConfig: Partial<UnifiedConfig>,
 ): Promise<{ testSuite: TestSuite; config: Partial<UnifiedConfig>; basePath: string }> {
-  // Config parsing
   let fileConfig: Partial<UnifiedConfig> = {};
+  let defaultConfig = _defaultConfig;
   const configPaths = cmdObj.config;
   if (configPaths) {
     fileConfig = await combineConfigs(configPaths);
+    // The user has provided a config file, so we do not want to use the default config.
+    defaultConfig = {};
   }
 
   // Standalone assertion mode
@@ -527,6 +556,7 @@ export async function resolveConfigs(
           firstN: cmdObj.filterFirstN,
           pattern: cmdObj.filterPattern,
           failing: cmdObj.filterFailing,
+          sample: cmdObj.filterSample,
         },
       );
       invariant(filteredTests, 'filteredTests are undefined');

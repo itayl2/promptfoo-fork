@@ -4,14 +4,15 @@ import type { Command } from 'commander';
 import dedent from 'dedent';
 import fs from 'fs';
 import * as path from 'path';
-import invariant from 'tiny-invariant';
 import { z } from 'zod';
 import { fromError } from 'zod-validation-error';
 import { disableCache } from '../cache';
 import cliState from '../cliState';
-import { getEnvFloat, getEnvInt, getEnvBool } from '../envars';
+import { getEnvFloat, getEnvInt } from '../envars';
 import { DEFAULT_MAX_CONCURRENCY, evaluate } from '../evaluator';
+import { promptForEmailUnverified } from '../globalConfig/accounts';
 import logger, { getLogLevel, setLogLevel } from '../logger';
+import { runDbMigrations } from '../migrate';
 import Eval from '../models/eval';
 import { loadApiProvider } from '../providers';
 import { createShareableUrl } from '../share';
@@ -26,15 +27,11 @@ import type {
 } from '../types';
 import { OutputFileExtension, TestSuiteSchema } from '../types';
 import { CommandLineOptionsSchema } from '../types';
-import { maybeLoadFromExternalFile } from '../util';
-import {
-  migrateResultsFromFileSystemToDatabase,
-  printBorder,
-  setupEnv,
-  writeMultipleOutputs,
-} from '../util';
-import { loadDefaultConfig } from '../util/config/default';
+import { isRunningUnderNpx, maybeLoadFromExternalFile } from '../util';
+import { printBorder, setupEnv, writeMultipleOutputs } from '../util';
+import { clearConfigCache, loadDefaultConfig } from '../util/config/default';
 import { resolveConfigs } from '../util/config/load';
+import invariant from '../util/invariant';
 import { filterProviders } from './eval/filterProviders';
 import { filterTests } from './eval/filterTests';
 
@@ -46,13 +43,32 @@ const EvalCommandSchema = CommandLineOptionsSchema.extend({
 
 type EvalCommandOptions = z.infer<typeof EvalCommandSchema>;
 
+function showRedteamProviderLabelMissingWarning(testSuite: TestSuite) {
+  const hasProviderWithoutLabel = testSuite.providers.some((p) => !p.label);
+  if (hasProviderWithoutLabel) {
+    logger.warn(
+      dedent`
+      ${chalk.bold.yellow('Warning')}: Your target (provider) does not have a label specified.
+
+      Labels are used to uniquely identify redteam targets. Please set a meaningful and unique label (e.g., 'helpdesk-search-agent') for your targets/providers in your redteam config.
+
+      Provider ID will be used as a fallback if no label is specified.
+      `,
+    );
+  }
+}
+
 export async function doEval(
   cmdObj: Partial<CommandLineOptions & Command>,
   defaultConfig: Partial<UnifiedConfig>,
   defaultConfigPath: string | undefined,
   evaluateOptions: EvaluateOptions,
-) {
+): Promise<Eval> {
   setupEnv(cmdObj.envPath);
+  if (cmdObj.verbose) {
+    setLogLevel('debug');
+  }
+
   let config: Partial<UnifiedConfig> | undefined = undefined;
   let testSuite: TestSuite | undefined = undefined;
   let _basePath: string | undefined = undefined;
@@ -62,13 +78,41 @@ export async function doEval(
     telemetry.record('command_used', {
       name: 'eval - started',
       watch: Boolean(cmdObj.watch),
+      // Only set when redteam is enabled for sure, because we don't know if config is loaded yet
+      ...(Boolean(config?.redteam) && { isRedteam: true }),
     });
     await telemetry.send();
 
-    // Misc settings
-    if (cmdObj.verbose) {
-      setLogLevel('debug');
+    if (cmdObj.write) {
+      await runDbMigrations();
     }
+
+    // Reload default config - because it may have changed.
+    if (defaultConfigPath) {
+      const configDir = path.dirname(defaultConfigPath);
+      const configName = path.basename(defaultConfigPath, path.extname(defaultConfigPath));
+      const { defaultConfig: newDefaultConfig } = await loadDefaultConfig(configDir, configName);
+      defaultConfig = newDefaultConfig;
+    }
+
+    if (cmdObj.config !== undefined) {
+      const configPaths: string[] = Array.isArray(cmdObj.config) ? cmdObj.config : [cmdObj.config];
+      for (const configPath of configPaths) {
+        if (fs.existsSync(configPath) && fs.statSync(configPath).isDirectory()) {
+          const { defaultConfig: dirConfig, defaultConfigPath: newConfigPath } =
+            await loadDefaultConfig(configPath);
+          if (newConfigPath) {
+            cmdObj.config = cmdObj.config.filter((path: string) => path !== configPath);
+            cmdObj.config.push(newConfigPath);
+            defaultConfig = { ...defaultConfig, ...dirConfig };
+          } else {
+            logger.warn(`No configuration file found in directory: ${configPath}`);
+          }
+        }
+      }
+    }
+
+    // Misc settings
     const iterations = cmdObj.repeat ?? Number.NaN;
     const repeat = Number.isSafeInteger(cmdObj.repeat) && iterations > 0 ? iterations : 1;
 
@@ -93,9 +137,23 @@ export async function doEval(
       firstN: cmdObj.filterFirstN,
       pattern: cmdObj.filterPattern,
       failing: cmdObj.filterFailing,
+      sample: cmdObj.filterSample,
     });
 
-    testSuite.providers = filterProviders(testSuite.providers, cmdObj.filterProviders);
+    if (
+      config.redteam &&
+      config.redteam.plugins &&
+      config.redteam.plugins.length > 0 &&
+      testSuite.tests &&
+      testSuite.tests.length > 0
+    ) {
+      await promptForEmailUnverified();
+    }
+
+    testSuite.providers = filterProviders(
+      testSuite.providers,
+      cmdObj.filterProviders || cmdObj.filterTargets,
+    );
 
     const options: EvaluateOptions = {
       showProgressBar: getLogLevel() === 'debug' ? false : cmdObj.progressBar,
@@ -143,17 +201,50 @@ export async function doEval(
     const evalRecord = cmdObj.write
       ? await Eval.create(config, testSuite.prompts)
       : new Eval(config);
-    await evaluate(testSuite, evalRecord, {
+
+    // Run the evaluation!!!!!!
+    const ret = await evaluate(testSuite, evalRecord, {
       ...options,
       eventSource: 'cli',
+      abortSignal: evaluateOptions.abortSignal,
     });
 
     const shareableUrl =
       cmdObj.share && config.sharing ? await createShareableUrl(evalRecord) : null;
 
-    const summary = await evalRecord.toEvaluateSummary();
-    const table = await evalRecord.getTable();
-    if (cmdObj.table && getLogLevel() !== 'debug') {
+    let successes = 0;
+    let failures = 0;
+    let errors = 0;
+    const tokenUsage = {
+      total: 0,
+      prompt: 0,
+      completion: 0,
+      cached: 0,
+      numRequests: 0,
+    };
+
+    // Calculate our total successes and failures
+    for (const prompt of evalRecord.prompts) {
+      if (prompt.metrics?.testPassCount) {
+        successes += prompt.metrics.testPassCount;
+      }
+      if (prompt.metrics?.testFailCount) {
+        failures += prompt.metrics.testFailCount;
+      }
+      if (prompt.metrics?.testErrorCount) {
+        errors += prompt.metrics.testErrorCount;
+      }
+      tokenUsage.total += prompt.metrics?.tokenUsage?.total || 0;
+      tokenUsage.prompt += prompt.metrics?.tokenUsage?.prompt || 0;
+      tokenUsage.completion += prompt.metrics?.tokenUsage?.completion || 0;
+      tokenUsage.cached += prompt.metrics?.tokenUsage?.cached || 0;
+      tokenUsage.numRequests += prompt.metrics?.tokenUsage?.numRequests || 0;
+    }
+    const totalTests = successes + failures + errors;
+    const passRate = (successes / totalTests) * 100;
+
+    if (cmdObj.table && getLogLevel() !== 'debug' && totalTests < 500) {
+      const table = await evalRecord.getTable();
       // Output CLI table
       const outputTable = generateTable(table);
 
@@ -162,29 +253,23 @@ export async function doEval(
         const rowsLeft = table.body.length - 25;
         logger.info(`... ${rowsLeft} more row${rowsLeft === 1 ? '' : 's'} not shown ...\n`);
       }
-    } else if (summary.stats.failures !== 0) {
+    } else if (failures !== 0) {
       logger.debug(
         `At least one evaluation failure occurred. This might be caused by the underlying call to the provider, or a test failure. Context: \n${JSON.stringify(
-          summary.results,
+          evalRecord.prompts,
         )}`,
       );
     }
 
-    await migrateResultsFromFileSystemToDatabase();
-
-    if (getEnvBool('PROMPTFOO_LIGHTWEIGHT_RESULTS')) {
-      const outputPath = config.outputPath;
-      config = { outputPath };
-      summary.results = [];
-      table.head.vars = [];
-      for (const row of table.body) {
-        row.vars = [];
-      }
+    if (totalTests >= 500) {
+      logger.info('No table output will be shown because there are more than 500 tests.');
     }
 
     const { outputPath } = config;
+
+    // We're removing JSONL from paths since we already wrote to that during the evaluation
     const paths = (Array.isArray(outputPath) ? outputPath : [outputPath]).filter(
-      (p): p is string => typeof p === 'string' && p.length > 0,
+      (p): p is string => typeof p === 'string' && p.length > 0 && !p.endsWith('.jsonl'),
     );
     if (paths.length) {
       await writeMultipleOutputs(paths, evalRecord, shareableUrl);
@@ -210,21 +295,30 @@ export async function doEval(
     } else {
       logger.info(`${chalk.green('✔')} Evaluation complete`);
     }
+
     printBorder();
-    const totalTests = summary.stats.successes + summary.stats.failures;
-    const passRate = (summary.stats.successes / totalTests) * 100;
-    logger.info(chalk.green.bold(`Successes: ${summary.stats.successes}`));
-    logger.info(chalk.red.bold(`Failures: ${summary.stats.failures}`));
-    logger.info(chalk.blue.bold(`Pass Rate: ${passRate.toFixed(2)}%`));
-    logger.info(
-      `Token usage: Total ${summary.stats.tokenUsage.total}, Prompt ${summary.stats.tokenUsage.prompt}, Completion ${summary.stats.tokenUsage.completion}, Cached ${summary.stats.tokenUsage.cached}`,
-    );
+
+    const isRedteam = Boolean(config.redteam);
+
+    logger.info(chalk.green.bold(`Successes: ${successes}`));
+    logger.info(chalk.red.bold(`Failures: ${failures}`));
+    if (!Number.isNaN(errors)) {
+      logger.info(chalk.red.bold(`Errors: ${errors}`));
+    }
+    if (!Number.isNaN(passRate)) {
+      logger.info(chalk.blue.bold(`Pass Rate: ${passRate.toFixed(2)}%`));
+    }
+    if (tokenUsage.total > 0) {
+      logger.info(
+        `${isRedteam ? `Total probes: ${tokenUsage.numRequests.toLocaleString()} / ` : ''}Total tokens: ${tokenUsage.total.toLocaleString()} / Prompt tokens: ${tokenUsage.prompt.toLocaleString()} / Completion tokens: ${tokenUsage.completion.toLocaleString()} / Cached tokens: ${tokenUsage.cached.toLocaleString()}`,
+      );
+    }
 
     telemetry.record('command_used', {
       name: 'eval',
       watch: Boolean(cmdObj.watch),
       duration: Math.round((Date.now() - startTime) / 1000),
-      isRedteam: Boolean(testSuite.redteam),
+      isRedteam,
     });
     await telemetry.send();
 
@@ -233,7 +327,8 @@ export async function doEval(
         const configPaths = (cmdObj.config || [defaultConfigPath]).filter(Boolean) as string[];
         if (!configPaths.length) {
           logger.error('Could not locate config file(s) to watch');
-          process.exit(1);
+          process.exitCode = 1;
+          return ret;
         }
         const basePath = path.dirname(configPaths[0]);
         const promptPaths = Array.isArray(config.prompts)
@@ -284,6 +379,7 @@ export async function doEval(
             printBorder();
             logger.info(`File change detected: ${path}`);
             printBorder();
+            clearConfigCache();
             await runEvaluation();
           })
           .on('error', (error) => logger.error(`Watcher error: ${error}`))
@@ -306,14 +402,19 @@ export async function doEval(
           );
         }
         logger.info('Done.');
-        process.exit(Number.isSafeInteger(failedTestExitCode) ? failedTestExitCode : 100);
+        process.exitCode = Number.isSafeInteger(failedTestExitCode) ? failedTestExitCode : 100;
+        return ret;
       } else {
         logger.info('Done.');
       }
     }
+    if (testSuite.redteam) {
+      showRedteamProviderLabelMissingWarning(testSuite);
+    }
+    return ret;
   };
 
-  await runEvaluation(true /* initialization */);
+  return await runEvaluation(true /* initialization */);
 }
 
 export function evalCommand(
@@ -335,7 +436,7 @@ export function evalCommand(
     // Core configuration
     .option(
       '-c, --config <paths...>',
-      'Path to configuration file. Automatically loads promptfooconfig.js/json/yaml',
+      'Path to configuration file. Automatically loads promptfooconfig.yaml',
     )
     .option('--env-file, --env-path <path>', 'Path to .env file')
 
@@ -409,7 +510,11 @@ export function evalCommand(
       '--filter-pattern <pattern>',
       'Only run tests whose description matches the regular expression pattern',
     )
-    .option('--filter-providers <providers>', 'Only run tests with these providers')
+    .option(
+      '--filter-providers, --filter-targets <providers>',
+      'Only run tests with these providers (regex match)',
+    )
+    .option('--filter-sample <number>', 'Only run a random sample of N tests')
     .option('--filter-failing <path>', 'Path to json output file')
 
     // Output configuration
@@ -447,8 +552,7 @@ export function evalCommand(
     .option('--description <description>', 'Description of the eval run')
     .option('--verbose', 'Show debug logs', defaultConfig?.commandLineOptions?.verbose)
     .option('--no-progress-bar', 'Do not show progress bar')
-
-    .action(async (opts: EvalCommandOptions) => {
+    .action(async (opts: EvalCommandOptions, command: Command) => {
       let validatedOpts: z.infer<typeof EvalCommandSchema>;
       try {
         validatedOpts = EvalCommandSchema.parse(opts);
@@ -461,6 +565,9 @@ export function evalCommand(
         process.exitCode = 1;
         return;
       }
+      if (command.args.length > 0) {
+        logger.warn(`Unknown command: ${command.args[0]}. Did you mean -c ${command.args[0]}?`);
+      }
 
       if (validatedOpts.help) {
         evalCmd.help();
@@ -468,15 +575,17 @@ export function evalCommand(
       }
 
       if (validatedOpts.interactiveProviders) {
+        const runCommand = isRunningUnderNpx() ? 'npx promptfoo eval' : 'promptfoo eval';
         logger.warn(
           chalk.yellow(dedent`
           Warning: The --interactive-providers option has been removed.
 
           Instead, use -j 1 to run evaluations with a concurrency of 1:
-          ${chalk.green('promptfoo eval -j 1')}
+          ${chalk.green(`${runCommand} -j 1`)}
         `),
         );
-        process.exit(2);
+        process.exitCode = 2;
+        return;
       }
 
       if (validatedOpts.remote) {
@@ -491,27 +600,6 @@ export function evalCommand(
           extension,
           `Unsupported output file format: ${maybeFilePath}. Please use one of: ${OutputFileExtension.options.join(', ')}.`,
         );
-      }
-
-      if (validatedOpts.config !== undefined) {
-        const configPaths: string[] = Array.isArray(validatedOpts.config)
-          ? validatedOpts.config
-          : [validatedOpts.config];
-        for (const configPath of configPaths) {
-          if (fs.existsSync(configPath) && fs.statSync(configPath).isDirectory()) {
-            const { defaultConfig: dirConfig, defaultConfigPath: newConfigPath } =
-              await loadDefaultConfig(configPath);
-            if (newConfigPath) {
-              validatedOpts.config = validatedOpts.config.filter(
-                (path: string) => path !== configPath,
-              );
-              validatedOpts.config.push(newConfigPath);
-              defaultConfig = { ...defaultConfig, ...dirConfig };
-            } else {
-              logger.warn(`No configuration file found in directory: ${configPath}`);
-            }
-          }
-        }
       }
 
       doEval(

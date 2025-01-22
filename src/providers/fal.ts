@@ -1,10 +1,9 @@
-import * as fal from '@fal-ai/serverless-client';
 import type { Cache } from 'cache-manager';
-import fetch from 'node-fetch';
 import { getCache, isCacheEnabled } from '../cache';
 import { getEnvString } from '../envars';
 import logger from '../logger';
-import type { ApiProvider, EnvOverrides, ProviderResponse } from '../types';
+import type { ApiProvider, CallApiContextParams, ProviderResponse } from '../types';
+import type { EnvOverrides } from '../types/env';
 
 type FalProviderOptions = {
   apiKey?: string;
@@ -16,6 +15,9 @@ class FalProvider<Input = any> implements ApiProvider {
   apiKey?: string;
   config: FalProviderOptions;
   input: Input;
+
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
+  private fal: typeof import('@fal-ai/serverless-client') | null = null;
 
   constructor(
     modelType: 'image',
@@ -42,7 +44,7 @@ class FalProvider<Input = any> implements ApiProvider {
     return `[fal.ai Inference Provider ${this.modelName}]`;
   }
 
-  async callApi(prompt: string): Promise<ProviderResponse> {
+  async callApi(prompt: string, context?: CallApiContextParams): Promise<ProviderResponse> {
     if (!this.apiKey) {
       throw new Error(
         'fal.ai API key is not set. Set the FAL_KEY environment variable or or add `apiKey` to the provider config.',
@@ -56,6 +58,7 @@ class FalProvider<Input = any> implements ApiProvider {
     const input = {
       prompt,
       ...this.input,
+      ...(context?.prompt?.config ?? {}),
     };
     const cacheKey = `fal:${this.modelName}:${JSON.stringify(input)}`;
     if (isCacheEnabled()) {
@@ -65,7 +68,11 @@ class FalProvider<Input = any> implements ApiProvider {
       cached = response !== undefined;
     }
 
-    fal.config({
+    if (!this.fal) {
+      this.fal = await import('@fal-ai/serverless-client');
+    }
+
+    this.fal.config({
       credentials: this.apiKey,
       fetch: fetch as any, // TODO fix type incompatibility
     });
@@ -89,7 +96,11 @@ class FalProvider<Input = any> implements ApiProvider {
   }
 
   async runInference<Result = any>(input: Input): Promise<Result> {
-    const result = await fal.subscribe(this.modelName, {
+    if (!this.fal) {
+      this.fal = await import('@fal-ai/serverless-client');
+    }
+
+    const result = await this.fal.subscribe(this.modelName, {
       input,
     });
     return result as Result;

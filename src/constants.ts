@@ -26,6 +26,10 @@ export const SHARE_VIEW_BASE_URL =
   process.env.PROMPTFOO_REMOTE_APP_BASE_URL ||
   DEFAULT_SHARE_VIEW_BASE_URL;
 
+export const DEFAULT_PORT = Number.parseInt(process.env.API_PORT || '15500');
+
 // Maximum width for terminal outputs.
 export const TERMINAL_MAX_WIDTH =
-  process?.stdout?.columns && process?.stdout?.columns > 10 ? process?.stdout?.columns - 10 : 120;
+  process?.stdout?.isTTY && process?.stdout?.columns && process?.stdout?.columns > 10
+    ? process?.stdout?.columns - 10
+    : 120;

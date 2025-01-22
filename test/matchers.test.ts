@@ -1,6 +1,12 @@
 import fs from 'fs';
 import path from 'path';
-import { getAndCheckProvider, getGradingProvider, matchesClassification } from '../src/matchers';
+import cliState from '../src/cliState';
+import {
+  getAndCheckProvider,
+  getGradingProvider,
+  matchesClassification,
+  matchesModeration,
+} from '../src/matchers';
 import {
   matchesSimilarity,
   matchesLlmRubric,
@@ -13,8 +19,15 @@ import {
 } from '../src/matchers';
 import { ANSWER_RELEVANCY_GENERATE, CONTEXT_RECALL, CONTEXT_RELEVANCE } from '../src/prompts';
 import { HuggingfaceTextClassificationProvider } from '../src/providers/huggingface';
-import { OpenAiChatCompletionProvider, OpenAiEmbeddingProvider } from '../src/providers/openai';
+import {
+  OpenAiChatCompletionProvider,
+  OpenAiEmbeddingProvider,
+  OpenAiModerationProvider,
+} from '../src/providers/openai';
 import { DefaultEmbeddingProvider, DefaultGradingProvider } from '../src/providers/openai';
+import { ReplicateModerationProvider } from '../src/providers/replicate';
+import { LLAMA_GUARD_REPLICATE_PROVIDER } from '../src/redteam/constants';
+import * as remoteGrading from '../src/remoteGrading';
 import type {
   GradingConfig,
   ProviderResponse,
@@ -22,7 +35,7 @@ import type {
   ApiProvider,
   ProviderTypeMap,
 } from '../src/types';
-import { TestGrader } from './utils';
+import { TestGrader } from './util/utils';
 
 jest.mock('../src/database', () => ({
   getDb: jest.fn().mockImplementation(() => {
@@ -32,6 +45,12 @@ jest.mock('../src/database', () => ({
 jest.mock('../src/esm');
 jest.mock('../src/logger');
 jest.mock('../src/cliState');
+jest.mock('../src/remoteGrading', () => ({
+  doRemoteGrading: jest.fn(),
+}));
+jest.mock('../src/redteam/remoteGeneration', () => ({
+  shouldGenerateRemote: jest.fn().mockReturnValue(true),
+}));
 jest.mock('proxy-agent', () => ({
   ProxyAgent: jest.fn().mockImplementation(() => ({})),
 }));
@@ -389,6 +408,60 @@ describe('matchesLlmRubric', () => {
       expect.stringContaining(path.join('path', 'to', 'external', 'rubric.txt')),
     );
     expect(fs.readFileSync).not.toHaveBeenCalled();
+    expect(grading.provider.callApi).not.toHaveBeenCalled();
+  });
+
+  it('should not call remote when rubric prompt is overridden, even if redteam is enabled', async () => {
+    const rubric = 'Test rubric';
+    const llmOutput = 'Test output';
+    const grading = {
+      rubricPrompt: 'Custom prompt',
+      provider: {
+        id: () => 'test-provider',
+        callApi: jest.fn().mockResolvedValue({
+          output: JSON.stringify({ pass: true, score: 1, reason: 'Test passed' }),
+          tokenUsage: { total: 10, prompt: 5, completion: 5 },
+        }),
+      },
+    };
+
+    // Give it a redteam config
+    cliState.config = { redteam: {} };
+
+    await matchesLlmRubric(rubric, llmOutput, grading);
+
+    const { doRemoteGrading } = remoteGrading;
+    expect(doRemoteGrading).not.toHaveBeenCalled();
+
+    expect(grading.provider.callApi).toHaveBeenCalledWith(expect.stringContaining('Custom prompt'));
+  });
+
+  it('should call remote when redteam is enabled and rubric prompt is not overridden', async () => {
+    const rubric = 'Test rubric';
+    const llmOutput = 'Test output';
+    const grading = {
+      provider: {
+        id: () => 'test-provider',
+        callApi: jest.fn().mockResolvedValue({
+          output: JSON.stringify({ pass: true, score: 1, reason: 'Test passed' }),
+          tokenUsage: { total: 10, prompt: 5, completion: 5 },
+        }),
+      },
+    };
+
+    // Give it a redteam config
+    cliState.config = { redteam: {} };
+
+    await matchesLlmRubric(rubric, llmOutput, grading);
+
+    const { doRemoteGrading } = remoteGrading;
+    expect(doRemoteGrading).toHaveBeenCalledWith({
+      task: 'llm-rubric',
+      rubric,
+      output: llmOutput,
+      vars: {},
+    });
+
     expect(grading.provider.callApi).not.toHaveBeenCalled();
   });
 });
@@ -1175,5 +1248,70 @@ describe('matchesContextRecall', () => {
     expect(mockCallApi).toHaveBeenCalledWith(expect.stringContaining(CONTEXT_RECALL.slice(0, 100)));
 
     mockCallApi.mockRestore();
+  });
+});
+
+describe('matchesModeration', () => {
+  const mockModerationResponse = {
+    flags: [],
+    tokenUsage: { total: 5, prompt: 2, completion: 3 },
+  };
+
+  beforeEach(() => {
+    // Clear all environment variables
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.REPLICATE_API_KEY;
+    delete process.env.REPLICATE_API_TOKEN;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('should use OpenAI when OPENAI_API_KEY is present', async () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    const openAiSpy = jest
+      .spyOn(OpenAiModerationProvider.prototype, 'callModerationApi')
+      .mockResolvedValue(mockModerationResponse);
+
+    await matchesModeration({
+      userPrompt: 'test prompt',
+      assistantResponse: 'test response',
+    });
+
+    expect(openAiSpy).toHaveBeenCalledWith('test prompt', 'test response');
+  });
+
+  it('should fallback to Replicate when only REPLICATE_API_KEY is present', async () => {
+    process.env.REPLICATE_API_KEY = 'test-key';
+    const replicateSpy = jest
+      .spyOn(ReplicateModerationProvider.prototype, 'callModerationApi')
+      .mockResolvedValue(mockModerationResponse);
+
+    await matchesModeration({
+      userPrompt: 'test prompt',
+      assistantResponse: 'test response',
+    });
+
+    expect(replicateSpy).toHaveBeenCalledWith('test prompt', 'test response');
+  });
+
+  it('should respect provider override in grading config', async () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    const replicateSpy = jest
+      .spyOn(ReplicateModerationProvider.prototype, 'callModerationApi')
+      .mockResolvedValue(mockModerationResponse);
+
+    await matchesModeration(
+      {
+        userPrompt: 'test prompt',
+        assistantResponse: 'test response',
+      },
+      {
+        provider: LLAMA_GUARD_REPLICATE_PROVIDER,
+      },
+    );
+
+    expect(replicateSpy).toHaveBeenCalledWith('test prompt', 'test response');
   });
 });

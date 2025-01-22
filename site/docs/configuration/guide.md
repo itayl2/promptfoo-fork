@@ -94,7 +94,7 @@ tests:
 ```
 
 :::tip
-To learn more about assertions, see docs on configuring [expected outputs](/docs/configuration/expected-outputs).
+To learn more about assertions, see docs on configuring [assertions and metrics](/docs/configuration/expected-outputs).
 :::
 
 ## Import providers from separate files
@@ -184,7 +184,21 @@ tests:
       context: file://fetch_from_vector_database.py
 ```
 
-This is useful when testing vector databases like Pinecone, Chroma, Milvus, etc.
+Scripted vars are useful when testing vector databases like Pinecone, Chroma, Milvus, etc. You can communicate directly with the database to fetch the context you need.
+
+PDFs are also supported and can be used to extract text from a document:
+
+```yaml
+tests:
+  - vars:
+      paper: file://pdfs/arxiv_1.pdf
+```
+
+Note that you must install the `pdf-parse` package to use PDFs as variables:
+
+```
+npm install pdf-parse
+```
 
 ### Javascript variables
 
@@ -230,7 +244,8 @@ tests:
 fetch_dynamic_context.py:
 
 ```python
-def get_var(var_name, prompt, other_vars):
+def get_var(var_name: str, prompt: str, other_vars: Dict[str, str]) -> Dict[str, str]:
+    # NOTE: Must return a dictionary with an 'output' key or an 'error' key.
     # Example logic to dynamically generate variable content
     if var_name == 'context':
         return {
@@ -286,6 +301,24 @@ You can also use `defaultTest` to override the model used for each test. This ca
 defaultTest:
   options:
     provider: openai:gpt-4o-mini-0613
+```
+
+### Default variables
+
+Use `defaultTest` to define variables that are shared across all tests:
+
+```yaml
+defaultTest:
+  vars:
+    template: 'A reusable prompt template with {{shared_var}}'
+    shared_var: 'some shared content'
+
+tests:
+  - vars:
+      unique_var: value1
+  - vars:
+      unique_var: value2
+      shared_var: 'override shared content' # Optionally override defaults
 ```
 
 ### YAML references
@@ -712,7 +745,7 @@ defaultTest:
 ```python
 import os
 
-def get_transform_vars(vars, context):
+def get_transform(vars, context):
     with open(vars['file_path'], 'r') as file:
         file_content = file.read()
 

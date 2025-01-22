@@ -1,8 +1,11 @@
 ---
 sidebar_position: 50
+sidebar_label: Custom Javascript
 ---
 
-# Custom Javascript
+# Javascript Provider
+
+Promptfoo supports custom Javascript and Typescript for integrations that go beyond single API calls (see also [HTTP API](/docs/providers/http/), [Python](/docs/providers/python/), [Browser](/docs/providers/browser/), and [Custom Script](/docs/providers/custom-script/)).
 
 To create a custom API provider, implement the `ApiProvider` interface in a separate module. Here is the interface:
 
@@ -70,8 +73,6 @@ See also: [ProviderResponse](/docs/configuration/reference/#providerresponse)
 Here's an example of a custom API provider that returns a predefined output along with token usage:
 
 ```javascript
-import fetch from 'node-fetch';
-
 class CustomApiProvider {
   constructor(options) {
     // Provider ID can be overridden by the config file (e.g. when using multiple of the same provider)
@@ -237,7 +238,11 @@ providers:
 
 ### ES modules
 
-ES modules are supported, but must have a `.mjs` file extension. Alternatively, if you are transpiling Javascript or Typescript, we recommend pointing promptfoo to the transpiled plain Javascript output.
+ES modules are supported, but must have a `.mjs` file extension.
+
+### Typescript
+
+Typescript is supported and must have a `.ts` file extension.
 
 ### Environment Variable Overrides
 
