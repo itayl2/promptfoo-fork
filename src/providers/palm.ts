@@ -1,12 +1,13 @@
 import { fetchWithCache } from '../cache';
 import { getEnvString } from '../envars';
 import logger from '../logger';
-import type { ApiProvider, ProviderResponse, CallApiContextParams } from '../types';
+import type { ApiProvider, ProviderResponse, CallApiContextParams, CallApiOptionsParams } from '../types';
 import type { EnvOverrides } from '../types/env';
 import { maybeLoadFromExternalFile, renderVarsInObject } from '../util';
 import { CHAT_MODELS } from './googleShared';
 import { parseChatPrompt, REQUEST_TIMEOUT_MS } from './shared';
 import { maybeCoerceToGeminiFormat } from './vertexUtil';
+import type { LLMFile } from '../types/motion';
 
 const DEFAULT_API_HOST = 'generativelanguage.googleapis.com';
 
@@ -22,6 +23,25 @@ interface PalmCompletionOptions {
   generationConfig?: Record<string, any>;
   responseSchema?: string;
 }
+
+type Part = {
+  text?: string;
+  fileData?: {
+    fileUri: string;
+    mimeType: string;
+  }
+};
+
+type Role = {
+  role: string;
+  parts: Part[];
+};
+
+type SystemInstruction = {
+  parts: Part[];
+};
+
+type GeminiContents = Role[];
 
 class PalmGenericProvider implements ApiProvider {
   modelName: string;
@@ -70,7 +90,7 @@ class PalmGenericProvider implements ApiProvider {
   }
 
   // @ts-ignore: Prompt is not used in this implementation
-  async callApi(prompt: string): Promise<ProviderResponse> {
+  async callApi(prompt: string, llmFile?: LLMFile): Promise<ProviderResponse> {
     throw new Error('Not implemented');
   }
 }
@@ -86,7 +106,12 @@ export class PalmChatProvider extends PalmGenericProvider {
     super(modelName, options);
   }
 
-  async callApi(prompt: string, context?: CallApiContextParams): Promise<ProviderResponse> {
+  async callApi(
+    prompt: string,
+    context?: CallApiContextParams,
+    options?: CallApiOptionsParams,
+    llmFile?: LLMFile,
+  ): Promise<ProviderResponse> {
     if (!this.getApiKey()) {
       throw new Error(
         'Google API key is not set. Set the GOOGLE_API_KEY environment variable or add `apiKey` to the provider config.',
@@ -95,12 +120,20 @@ export class PalmChatProvider extends PalmGenericProvider {
 
     const isGemini = this.modelName.startsWith('gemini');
     if (isGemini) {
-      return this.callGemini(prompt, context);
+      return this.callGemini(prompt, context, llmFile);
     }
 
     // https://developers.generativeai.google/tutorials/curl_quickstart
     // https://ai.google.dev/api/rest/v1beta/models/generateMessage
-    const messages = parseChatPrompt(prompt, [{ content: prompt }]);
+    const messages = parseChatPrompt(prompt, [
+      {
+        fileData: {
+          mimeType: 'video/mp4',
+          fileUri: 'https://generativelanguage.googleapis.com/v1beta/files/aevyiwsr0gr6',
+        },
+      },
+      { text: prompt },
+    ]);
     const body = {
       prompt: { messages },
       temperature: this.config.temperature,
@@ -154,11 +187,44 @@ export class PalmChatProvider extends PalmGenericProvider {
     }
   }
 
-  async callGemini(prompt: string, context?: CallApiContextParams): Promise<ProviderResponse> {
-    const { contents, systemInstruction } = maybeCoerceToGeminiFormat(
-      parseChatPrompt(prompt, [{ content: prompt }]),
-    );
-    const body: Record<string, any> = {
+  async callGemini(prompt: string, context?: CallApiContextParams, llmFile?: LLMFile): Promise<ProviderResponse> {
+    const geminiFiles = llmFile ? [{
+      fileData: {
+        fileUri: llmFile.url,
+        mimeType: llmFile.mimeType,
+      }
+    }] : [];
+
+    let systemInstruction: SystemInstruction | undefined;
+
+    const promptInSystemInstruction = process.env.PROMPT_IN_SYSTEM_INSTRUCTION && process.env.PROMPT_IN_SYSTEM_INSTRUCTION.toLowerCase() === 'true';
+    if (promptInSystemInstruction) {
+      systemInstruction = { parts: [{ text: prompt }] };
+    }
+
+    const contentsDefaultValue: GeminiContents = [];
+    const userRole: Role = {
+      role: 'user',
+      parts: [],
+    };
+    if (!promptInSystemInstruction) {
+      userRole.parts.push({ text: prompt });
+    }
+    if (process.env.USER_ROLE_MESSAGE_CONTENTS?.length) {
+      userRole.parts.push({ text: process.env.USER_ROLE_MESSAGE_CONTENTS });
+    }
+
+    if (geminiFiles.length > 0) {
+      userRole.parts.push(...geminiFiles);
+    }
+
+    if (userRole.parts.length === 0) {
+      throw new Error('USER_ROLE_MESSAGE_CONTENTS must be set or PROMPT_IN_SYSTEM_INSTRUCTION must be false or files must be included otherwise there is no user input');
+    }
+    contentsDefaultValue.push(userRole);
+
+    const contents = parseChatPrompt(prompt, contentsDefaultValue);
+    const body = {
       contents,
       generationConfig: {
         temperature: this.config.temperature,

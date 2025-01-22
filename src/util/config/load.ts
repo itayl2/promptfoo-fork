@@ -27,7 +27,7 @@ import {
   type TestSuite,
   type UnifiedConfig,
 } from '../../types';
-import { maybeLoadFromExternalFile, readFilters } from '../../util';
+import { maybeLoadFromExternalFile, readFilters, setupEnv } from '../../util';
 import { isJavascriptFile } from '../../util/file';
 import invariant from '../../util/invariant';
 import { PromptSchema } from '../../validators/prompts';
@@ -144,6 +144,7 @@ export async function dereferenceConfig(rawConfig: UnifiedConfig): Promise<Unifi
 }
 
 export async function readConfig(configPath: string): Promise<UnifiedConfig> {
+  setupEnv(undefined);
   let ret: UnifiedConfig & {
     targets?: UnifiedConfig['providers'];
     plugins?: RedteamPluginObject[];
@@ -151,7 +152,12 @@ export async function readConfig(configPath: string): Promise<UnifiedConfig> {
   };
   const ext = path.parse(configPath).ext;
   if (ext === '.json' || ext === '.yaml' || ext === '.yml') {
-    const rawConfig = yaml.load(fs.readFileSync(configPath, 'utf-8'));
+    let contents = fs.readFileSync(configPath, 'utf-8');
+    const basePath = process.env.BASE_PATH;
+    if (basePath) {
+      contents = contents.replace(/BASE_PATH/g, basePath);
+    }
+    const rawConfig = yaml.load(contents);
     const dereferencedConfig = await dereferenceConfig(rawConfig as UnifiedConfig);
     // Validator requires `prompts`, but prompts is not actually required for redteam.
     const UnifiedConfigSchemaWithoutPrompts = UnifiedConfigSchema.innerType()

@@ -2,6 +2,7 @@ import type winston from 'winston';
 import type { EnvOverrides } from './env';
 import type { Prompt } from './prompts';
 import type { NunjucksFilterMap, TokenUsage } from './shared';
+import type { LLMFile } from './motion';
 
 export type ProviderId = string;
 export type ProviderLabel = string;
@@ -137,6 +138,7 @@ export type CallApiFunction = {
     prompt: string,
     context?: CallApiContextParams,
     options?: CallApiOptionsParams,
+    llmFile?: LLMFile,
   ): Promise<ProviderResponse>;
   label?: string;
 };
