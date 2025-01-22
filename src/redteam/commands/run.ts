@@ -4,15 +4,22 @@ import cliState from '../../cliState';
 import logger, { setLogLevel } from '../../logger';
 import telemetry from '../../telemetry';
 import { setupEnv } from '../../util';
+import { getConfigFromCloud } from '../../util/cloud';
 import { doRedteamRun } from '../shared';
+import { getUnifiedConfig } from '../sharedFrontend';
 import type { RedteamRunOptions } from '../types';
 import { poisonCommand } from './poison';
+
+const UUID_REGEX = /^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$/;
 
 export function redteamRunCommand(program: Command) {
   program
     .command('run')
     .description('Run red teaming process (init, generate, and evaluate)')
-    .option('-c, --config [path]', 'Path to configuration file. Defaults to promptfooconfig.yaml')
+    .option(
+      '-c, --config [path]',
+      'Path to configuration file or cloud config UUID. Defaults to promptfooconfig.yaml',
+    )
     .option(
       '-o, --output [path]',
       'Path to output file for generated tests. Defaults to redteam.yaml',
@@ -43,6 +50,14 @@ export function redteamRunCommand(program: Command) {
         setLogLevel('debug');
       }
 
+      if (opts.config && UUID_REGEX.test(opts.config)) {
+        const configObj = await getConfigFromCloud(opts.config);
+        opts.liveRedteamConfig = getUnifiedConfig(configObj.config);
+        opts.config = undefined;
+
+        opts.loadedFromCloud = true;
+      }
+
       try {
         if (opts.remote) {
           cliState.remote = true;
@@ -55,7 +70,7 @@ export function redteamRunCommand(program: Command) {
             logger.error(`  ${err.path.join('.')}: ${err.message}`);
           });
         } else {
-          logger.error('An unexpected error occurred:', error);
+          logger.error(`An unexpected error occurred: ${error}`);
         }
         process.exitCode = 1;
       }

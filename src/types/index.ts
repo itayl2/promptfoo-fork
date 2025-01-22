@@ -59,9 +59,10 @@ export const CommandLineOptionsSchema = z.object({
   watch: z.boolean().optional(),
   filterFailing: z.string().optional(),
   filterFirstN: z.coerce.number().int().positive().optional(),
-  filterSample: z.coerce.number().int().positive().optional(),
+  filterMetadata: z.string().optional(),
   filterPattern: z.string().optional(),
   filterProviders: z.string().optional(),
+  filterSample: z.coerce.number().int().positive().optional(),
   filterTargets: z.string().optional(),
   var: z.record(z.string()).optional(),
 
@@ -234,20 +235,21 @@ export interface EvaluateResult {
 }
 
 export interface EvaluateTableOutput {
-  id: string;
-  pass: boolean;
-  failureReason: ResultFailureReason;
-  score: number;
-  namedScores: Record<string, number>;
-  text: string;
-  prompt: string;
-  latencyMs: number;
-  provider?: string;
-  tokenUsage?: Partial<TokenUsage>;
-  gradingResult?: GradingResult | null;
   cost: number;
+  failureReason: ResultFailureReason;
+  gradingResult?: GradingResult | null;
+  id: string;
+  latencyMs: number;
   metadata?: Record<string, any>;
+  namedScores: Record<string, number>;
+  pass: boolean;
+  prompt: string;
+  provider?: string;
   response?: ProviderResponse;
+  score: number;
+  testCase: AtomicTestCase;
+  text: string;
+  tokenUsage?: Partial<TokenUsage>;
 }
 
 export interface EvaluateTableRow {
@@ -363,10 +365,13 @@ export const BaseAssertionTypesSchema = z.enum([
   'cost',
   'equals',
   'factuality',
+  'g-eval',
+  'guardrails',
   'icontains-all',
   'icontains-any',
   'icontains',
   'is-json',
+  'is-refusal',
   'is-sql',
   'is-valid-openai-function-call',
   'is-valid-openai-tools-call',
@@ -422,6 +427,10 @@ const AssertionSetSchema = z.object({
   metric: z.string().optional(),
   // The required score for this assert set. If not provided, the test case is graded pass/fail.
   threshold: z.number().optional(),
+
+  // An external mapping of arbitrary strings to values that is defined
+  // for every assertion in the set and passed into each assert
+  config: z.record(z.string(), z.any()).optional(),
 });
 
 export type AssertionSet = z.infer<typeof AssertionSetSchema>;
@@ -435,7 +444,7 @@ export const AssertionSchema = z.object({
   value: z.custom<AssertionValue>().optional(),
 
   // An external mapping of arbitrary strings to values that is passed
-  // to the assertion for custom javascript asserts
+  // to the assertion for custom asserts
   config: z.record(z.string(), z.any()).optional(),
 
   // The threshold value, only applicable for similarity (cosine distance)
@@ -516,10 +525,10 @@ const MetadataSchema = z.record(z.string(), z.any());
 export const VarsSchema = z.record(
   z.union([
     z.string(),
-    z.number().transform(String),
-    z.boolean().transform(String),
-    z.array(z.union([z.string(), z.number().transform(String), z.boolean().transform(String)])),
-    z.object({}),
+    z.number(),
+    z.boolean(),
+    z.array(z.union([z.string(), z.number(), z.boolean()])),
+    z.record(z.string(), z.any()),
     z.array(z.any()),
   ]),
 );

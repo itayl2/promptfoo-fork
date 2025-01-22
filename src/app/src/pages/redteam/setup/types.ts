@@ -1,4 +1,5 @@
 import type { RedteamPlugin, RedteamStrategy } from '@promptfoo/redteam/types';
+import type { TestCase } from '@promptfoo/types';
 
 export interface Config {
   description: string;
@@ -7,6 +8,7 @@ export interface Config {
   plugins: (RedteamPlugin | { id: string; config?: any })[];
   strategies: RedteamStrategy[];
   purpose?: string;
+  numTests?: number;
   applicationDefinition: {
     purpose?: string;
     systemPrompt?: string;
@@ -18,6 +20,7 @@ export interface Config {
     connectedSystems?: string;
   };
   entities: string[];
+  defaultTest?: TestCase;
 }
 
 export interface ProviderOptions {

@@ -1,15 +1,14 @@
 import type { TokenCredential } from '@azure/identity';
-import { ClientSecretCredential, AzureCliCredential } from '@azure/identity';
 import type {
-  AssistantsClient,
   AssistantCreationOptions,
+  AssistantsClient,
   FunctionDefinition,
-  RunStepToolCallDetails,
   RunStepMessageCreationDetails,
+  RunStepToolCallDetails,
 } from '@azure/openai-assistants';
 import dedent from 'dedent';
 import { fetchWithCache } from '../cache';
-import { getEnvString, getEnvFloat, getEnvInt } from '../envars';
+import { getEnvFloat, getEnvInt, getEnvString } from '../envars';
 import logger from '../logger';
 import type {
   ApiProvider,
@@ -22,7 +21,9 @@ import type { EnvOverrides } from '../types/env';
 import { maybeLoadFromExternalFile, renderVarsInObject } from '../util';
 import invariant from '../util/invariant';
 import { sleep } from '../util/time';
-import { REQUEST_TIMEOUT_MS, parseChatPrompt, toTitleCase, calculateCost } from './shared';
+import { calculateCost, parseChatPrompt, REQUEST_TIMEOUT_MS, toTitleCase } from './shared';
+
+export const DEFAULT_AZURE_API_VERSION = '2024-12-01-preview';
 
 interface AzureCompletionOptions {
   // Azure identity params
@@ -31,6 +32,8 @@ interface AzureCompletionOptions {
   azureTenantId?: string;
   azureAuthorityHost?: string;
   azureTokenScope?: string;
+  o1?: boolean; // Indicates if the model should be treated as an o1 model
+  max_completion_tokens?: number; // Maximum number of tokens to generate for o1 models
 
   // Azure cognitive services params
   deployment_id?: string;
@@ -294,7 +297,7 @@ export class AzureGenericProvider implements ApiProvider {
     return apiKey;
   }
 
-  getAzureTokenCredential(): TokenCredential {
+  async getAzureTokenCredential(): Promise<TokenCredential> {
     const clientSecret =
       this.config?.azureClientSecret ||
       this.env?.AZURE_CLIENT_SECRET ||
@@ -308,6 +311,8 @@ export class AzureGenericProvider implements ApiProvider {
       this.env?.AZURE_AUTHORITY_HOST ||
       getEnvString('AZURE_AUTHORITY_HOST');
 
+    const { ClientSecretCredential, AzureCliCredential } = await import('@azure/identity');
+
     if (clientSecret && clientId && tenantId) {
       const credential = new ClientSecretCredential(tenantId, clientId, clientSecret, {
         authorityHost: authorityHost || 'https://login.microsoftonline.com',
@@ -315,13 +320,13 @@ export class AzureGenericProvider implements ApiProvider {
       return credential;
     }
 
-    //fallback to Azure CLI
+    // Fallback to Azure CLI
     const credential = new AzureCliCredential();
     return credential;
   }
 
   async getAccessToken() {
-    const credential = this.getAzureTokenCredential();
+    const credential = await this.getAzureTokenCredential();
     const tokenScope =
       this.config?.azureTokenScope ||
       this.env?.AZURE_TOKEN_SCOPE ||
@@ -344,7 +349,7 @@ export class AzureGenericProvider implements ApiProvider {
         const token = await this.getAccessToken();
         return { Authorization: 'Bearer ' + token };
       } catch (err) {
-        logger.info('Azure Authentication failed. Please check your credentials.', err);
+        logger.info(`Azure Authentication failed. Please check your credentials: ${err}`);
         throw new Error(`Azure Authentication failed. 
 Please choose one of the following options:
   1. Set an API key via the AZURE_API_KEY environment variable.
@@ -401,7 +406,7 @@ export class AzureEmbeddingProvider extends AzureGenericProvider {
     try {
       ({ data, cached } = (await fetchWithCache(
         `${this.getApiBaseUrl()}/openai/deployments/${this.deploymentName}/embeddings?api-version=${
-          this.config.apiVersion || '2023-12-01-preview'
+          this.config.apiVersion || DEFAULT_AZURE_API_VERSION
         }`,
         {
           method: 'POST',
@@ -505,7 +510,7 @@ export class AzureCompletionProvider extends AzureGenericProvider {
       ({ data, cached } = (await fetchWithCache(
         `${this.getApiBaseUrl()}/openai/deployments/${
           this.deploymentName
-        }/completions?api-version=${this.config.apiVersion || '2023-12-01-preview'}`,
+        }/completions?api-version=${this.config.apiVersion || DEFAULT_AZURE_API_VERSION}`,
         {
           method: 'POST',
           headers: {
@@ -573,11 +578,15 @@ export class AzureChatCompletionProvider extends AzureGenericProvider {
     const body = {
       model: this.deploymentName,
       messages,
-      max_tokens: config.max_tokens ?? getEnvInt('OPENAI_MAX_TOKENS', 1024),
-      temperature: config.temperature ?? getEnvFloat('OPENAI_TEMPERATURE', 0),
       top_p: config.top_p ?? getEnvFloat('OPENAI_TOP_P', 1),
       presence_penalty: config.presence_penalty ?? getEnvFloat('OPENAI_PRESENCE_PENALTY', 0),
       frequency_penalty: config.frequency_penalty ?? getEnvFloat('OPENAI_FREQUENCY_PENALTY', 0),
+      ...(config.o1
+        ? { max_completion_tokens: config.max_completion_tokens }
+        : {
+            max_tokens: config.max_tokens ?? getEnvInt('OPENAI_MAX_TOKENS', 1024),
+            temperature: config.temperature ?? getEnvFloat('OPENAI_TEMPERATURE', 0),
+          }),
       ...(config.functions
         ? {
             functions: maybeLoadFromExternalFile(
@@ -625,10 +634,10 @@ export class AzureChatCompletionProvider extends AzureGenericProvider {
       const url = config.dataSources
         ? `${this.getApiBaseUrl()}/openai/deployments/${
             this.deploymentName
-          }/extensions/chat/completions?api-version=${config.apiVersion || '2023-12-01-preview'}`
+          }/extensions/chat/completions?api-version=${config.apiVersion || DEFAULT_AZURE_API_VERSION}`
         : `${this.getApiBaseUrl()}/openai/deployments/${
             this.deploymentName
-          }/chat/completions?api-version=${config.apiVersion || '2023-12-01-preview'}`;
+          }/chat/completions?api-version=${config.apiVersion || DEFAULT_AZURE_API_VERSION}`;
 
       const {
         data: responseData,
@@ -702,6 +711,23 @@ export class AzureChatCompletionProvider extends AzureGenericProvider {
         (logProbObj: { token: string; logprob: number }) => logProbObj.logprob,
       );
 
+      const contentFilterResults = data.choices[0]?.content_filter_results;
+      const promptFilterResults = data.prompt_filter_results;
+
+      const guardrailsTriggered = !!(
+        (contentFilterResults && Object.keys(contentFilterResults).length > 0) ||
+        (promptFilterResults && promptFilterResults.length > 0)
+      );
+
+      const flaggedInput =
+        promptFilterResults?.some((result: any) =>
+          Object.values(result.content_filter_results).some((filter: any) => filter.filtered),
+        ) ?? false;
+
+      const flaggedOutput = Object.values(contentFilterResults || {}).some(
+        (filter: any) => filter.filtered,
+      );
+
       return {
         output,
         tokenUsage: cached
@@ -719,6 +745,15 @@ export class AzureChatCompletionProvider extends AzureGenericProvider {
           data.usage?.prompt_tokens,
           data.usage?.completion_tokens,
         ),
+        ...(guardrailsTriggered
+          ? {
+              guardrails: {
+                flaggedInput,
+                flaggedOutput,
+                flagged: flaggedInput || flaggedOutput,
+              },
+            }
+          : {}),
       };
     } catch (err) {
       return {

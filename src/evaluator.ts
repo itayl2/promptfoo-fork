@@ -5,9 +5,11 @@ import { randomUUID } from 'crypto';
 import { globSync } from 'glob';
 import * as path from 'path';
 import readline from 'readline';
+import type winston from 'winston';
 import { runAssertions, runCompareAssertion } from './assertions';
 import { fetchWithCache, getCache } from './cache';
 import cliState from './cliState';
+import { updateSignalFile } from './database/signal';
 import { getEnvBool, getEnvInt, isCI } from './envars';
 import { renderPrompt, runExtensionHook } from './evaluatorHelpers';
 import logger from './logger';
@@ -16,8 +18,8 @@ import { generateIdFromPrompt } from './models/prompt';
 import { maybeEmitAzureOpenAiWarning } from './providers/azureUtil';
 import { generatePrompts } from './suggestions';
 import telemetry from './telemetry';
+import type { Vars } from './types';
 import {
-  ResultFailureReason,
   type ApiProvider,
   type Assertion,
   type CompletedPrompt,
@@ -26,11 +28,13 @@ import {
   type EvaluateStats,
   type Prompt,
   type ProviderResponse,
+  ResultFailureReason,
   type RunEvalOptions,
   type TestSuite,
 } from './types';
 import { JsonlFileWriter } from './util/exportToFile/writeToFile';
 import invariant from './util/invariant';
+import { safeJsonStringify } from './util/json';
 import { sleep } from './util/time';
 import { transform, type TransformContext, TransformInputType } from './util/transform';
 
@@ -225,8 +229,9 @@ class Evaluator {
             prompt,
             filters,
             originalProvider: provider,
+            test,
             // All of these are removed in python and script providers, but every Javascript provider gets them
-            logger,
+            logger: logger as winston.Logger,
             fetchWithCache,
             getCache,
           },
@@ -274,10 +279,15 @@ class Evaluator {
       };
       if (response.error) {
         ret.error = response.error;
-      } else if (response.output == null) {
-        ret.success = false;
-        ret.score = 0;
-        ret.error = 'No output';
+      } else if (response.output === null || response.output === undefined) {
+        // NOTE: empty output often indicative of guardrails, so behavior differs for red teams.
+        if (this.testSuite.redteam) {
+          ret.success = true;
+        } else {
+          ret.success = false;
+          ret.score = 0;
+          ret.error = 'No output';
+        }
       } else {
         // Create a copy of response so we can potentially mutate it.
         const processedResponse = { ...response };
@@ -523,12 +533,12 @@ class Evaluator {
 
     // Prepare vars
     const varNames: Set<string> = new Set();
-    const varsWithSpecialColsRemoved: Record<string, string | string[] | object>[] = [];
+    const varsWithSpecialColsRemoved: Vars[] = [];
     const inputTransformDefault = testSuite?.defaultTest?.options?.transformVars;
     for (const testCase of tests) {
       testCase.vars = { ...testSuite.defaultTest?.vars, ...testCase?.vars };
       if (testCase.vars) {
-        const varWithSpecialColsRemoved: Record<string, string | string[] | object> = {};
+        const varWithSpecialColsRemoved: Vars = {};
         const inputTransformForIndividualTest = testCase.options?.transformVars;
         const inputTransform = inputTransformForIndividualTest || inputTransformDefault;
         if (inputTransform) {
@@ -536,7 +546,7 @@ class Evaluator {
             prompt: {},
             uuid: randomUUID(),
           };
-          const transformedVars = await transform(
+          const transformedVars: Vars = await transform(
             inputTransform,
             testCase.vars,
             transformContext,
@@ -672,7 +682,7 @@ class Evaluator {
       try {
         await this.evalRecord.addResult(row, evalStep.test);
       } catch (error) {
-        logger.error(`Error saving result: ${error} ${JSON.stringify(row)}`);
+        logger.error(`Error saving result: ${error} ${safeJsonStringify(row)}`);
       }
 
       for (const writer of this.fileWriters) {
@@ -844,7 +854,7 @@ class Evaluator {
 
     // Then run concurrent evaluations
     logger.info(
-      `Running ${concurrentRunEvalOptions.length} concurrent evaluations with ${concurrency} threads...`,
+      `Running ${concurrentRunEvalOptions.length} concurrent evaluations with up to ${concurrency} threads...`,
     );
     await async.forEachOfLimit(concurrentRunEvalOptions, concurrency, async (evalStep, index) => {
       checkAbort();
@@ -983,6 +993,10 @@ class Evaluator {
       // FIXME(ian): Does this work?  I think redteam is only on the config, not testSuite.
       // isRedteam: Boolean(testSuite.redteam),
     });
+
+    // Update database signal file after all results are written
+    updateSignalFile();
+
     return this.evalRecord;
   }
 }

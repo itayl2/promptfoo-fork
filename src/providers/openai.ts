@@ -19,12 +19,13 @@ import { renderVarsInObject } from '../util';
 import { maybeLoadFromExternalFile } from '../util';
 import { safeJsonStringify } from '../util/json';
 import { sleep } from '../util/time';
+import { ellipsize } from '../utils/text';
 import type { OpenAiFunction, OpenAiTool } from './openaiUtil';
 import { calculateCost, REQUEST_TIMEOUT_MS, parseChatPrompt, toTitleCase } from './shared';
 
 // see https://platform.openai.com/docs/models
-const OPENAI_CHAT_MODELS = [
-  ...['o1-preview', 'o1-preview-2024-09-12'].map((model) => ({
+export const OPENAI_CHAT_MODELS = [
+  ...['o1', 'o1-2024-12-17', 'o1-preview', 'o1-preview-2024-09-12'].map((model) => ({
     id: model,
     cost: {
       input: 15 / 1e6,
@@ -110,7 +111,7 @@ const OPENAI_CHAT_MODELS = [
 ];
 
 // See https://platform.openai.com/docs/models/model-endpoint-compatibility
-const OPENAI_COMPLETION_MODELS = [
+export const OPENAI_COMPLETION_MODELS = [
   {
     id: 'gpt-3.5-turbo-instruct',
     cost: {
@@ -179,7 +180,7 @@ export type OpenAiCompletionOptions = OpenAiSharedOptions & {
   >;
 };
 
-function failApiCall(err: any) {
+export function failApiCall(err: any) {
   if (err instanceof OpenAI.APIError) {
     return {
       error: `API error: ${err.type} ${err.message}`,
@@ -190,7 +191,7 @@ function failApiCall(err: any) {
   };
 }
 
-function getTokenUsage(data: any, cached: boolean): Partial<TokenUsage> {
+export function getTokenUsage(data: any, cached: boolean): Partial<TokenUsage> {
   if (data.usage) {
     if (cached) {
       return { cached: data.usage.total_tokens, total: data.usage.total_tokens };
@@ -331,7 +332,7 @@ export class OpenAiEmbeddingProvider extends OpenAiGenericProvider {
   }
 }
 
-function formatOpenAiError(data: {
+export function formatOpenAiError(data: {
   error: { message: string; type?: string; code?: string };
 }): string {
   let errorMessage = `API error: ${data.error.message}`;
@@ -494,7 +495,7 @@ export class OpenAiChatCompletionProvider extends OpenAiGenericProvider {
     const messages = parseChatPrompt(prompt, [{ role: 'user', content: prompt }]);
 
     // NOTE: Special handling for o1 models which do not support max_tokens and temperature
-    const isO1Model = this.modelName.startsWith('o1-');
+    const isO1Model = this.modelName.startsWith('o1');
     const maxCompletionTokens = isO1Model
       ? (config.max_completion_tokens ?? getEnvInt('OPENAI_MAX_COMPLETION_TOKENS'))
       : undefined;
@@ -512,11 +513,23 @@ export class OpenAiChatCompletionProvider extends OpenAiGenericProvider {
       ...(maxTokens ? { max_tokens: maxTokens } : {}),
       ...(maxCompletionTokens ? { max_completion_tokens: maxCompletionTokens } : {}),
       ...(temperature ? { temperature } : {}),
-      top_p: config.top_p ?? Number.parseFloat(process.env.OPENAI_TOP_P || '1'),
-      presence_penalty:
-        config.presence_penalty ?? Number.parseFloat(process.env.OPENAI_PRESENCE_PENALTY || '0'),
-      frequency_penalty:
-        config.frequency_penalty ?? Number.parseFloat(process.env.OPENAI_FREQUENCY_PENALTY || '0'),
+      ...(config.top_p !== undefined || process.env.OPENAI_TOP_P
+        ? { top_p: config.top_p ?? Number.parseFloat(process.env.OPENAI_TOP_P || '1') }
+        : {}),
+      ...(config.presence_penalty !== undefined || process.env.OPENAI_PRESENCE_PENALTY
+        ? {
+            presence_penalty:
+              config.presence_penalty ??
+              Number.parseFloat(process.env.OPENAI_PRESENCE_PENALTY || '0'),
+          }
+        : {}),
+      ...(config.frequency_penalty !== undefined || process.env.OPENAI_FREQUENCY_PENALTY
+        ? {
+            frequency_penalty:
+              config.frequency_penalty ??
+              Number.parseFloat(process.env.OPENAI_FREQUENCY_PENALTY || '0'),
+          }
+        : {}),
       ...(config.functions
         ? {
             functions: maybeLoadFromExternalFile(
@@ -529,6 +542,7 @@ export class OpenAiChatCompletionProvider extends OpenAiGenericProvider {
         ? { tools: maybeLoadFromExternalFile(renderVarsInObject(config.tools, context?.vars)) }
         : {}),
       ...(config.tool_choice ? { tool_choice: config.tool_choice } : {}),
+      ...(config.tool_resources ? { tool_resources: config.tool_resources } : {}),
       ...(config.response_format
         ? {
             response_format: maybeLoadFromExternalFile(
@@ -697,9 +711,11 @@ type OpenAiAssistantOptions = OpenAiSharedOptions & {
   toolChoice?:
     | 'none'
     | 'auto'
+    | 'required'
     | { type: 'function'; function?: { name: string } }
     | { type: 'file_search' };
   attachments?: OpenAI.Beta.Threads.Message.Attachment[];
+  tool_resources?: OpenAI.Beta.Threads.ThreadCreateAndRunParams['tool_resources'];
 };
 
 export class OpenAiAssistantProvider extends OpenAiGenericProvider {
@@ -754,6 +770,7 @@ export class OpenAiAssistantProvider extends OpenAiGenericProvider {
       metadata: this.assistantConfig.metadata || undefined,
       temperature: this.assistantConfig.temperature || undefined,
       tool_choice: this.assistantConfig.toolChoice || undefined,
+      tool_resources: this.assistantConfig.tool_resources || undefined,
       thread: {
         messages,
       },
@@ -963,25 +980,19 @@ export class OpenAiImageProvider extends OpenAiGenericProvider {
     }
 
     if (!response) {
-      try {
-        response = await openai.images.generate({
-          model: this.modelName,
-          prompt,
-          n: 1,
-          size:
-            ((this.config.size || process.env.OPENAI_IMAGE_SIZE) as
-              | '1024x1024'
-              | '256x256'
-              | '512x512'
-              | '1792x1024'
-              | '1024x1792'
-              | undefined) || '1024x1024',
-        });
-      } catch (error) {
-        return {
-          error: `OpenAI threw error: ${(error as Error).message}`,
-        };
-      }
+      response = await openai.images.generate({
+        model: this.modelName,
+        prompt,
+        n: 1,
+        size:
+          ((this.config.size || process.env.OPENAI_IMAGE_SIZE) as
+            | '1024x1024'
+            | '256x256'
+            | '512x512'
+            | '1792x1024'
+            | '1024x1792'
+            | undefined) || '1024x1024',
+      });
     }
     const url = response.data[0].url;
     if (!url) {
@@ -1002,8 +1013,7 @@ export class OpenAiImageProvider extends OpenAiGenericProvider {
       .replace(/\r?\n|\r/g, ' ')
       .replace(/\[/g, '(')
       .replace(/\]/g, ')');
-    const ellipsizedPrompt =
-      sanitizedPrompt.length > 50 ? `${sanitizedPrompt.substring(0, 47)}...` : sanitizedPrompt;
+    const ellipsizedPrompt = ellipsize(sanitizedPrompt, 50);
     return {
       output: `![${ellipsizedPrompt}](${url})`,
       cached,

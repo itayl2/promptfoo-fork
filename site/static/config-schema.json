@@ -212,6 +212,15 @@
                             },
                             "WATSONX_AI_BEARER_TOKEN": {
                               "type": "string"
+                            },
+                            "WATSONX_AI_AUTH_TYPE": {
+                              "type": "string"
+                            },
+                            "PROMPTFOO_CA_CERT_PATH": {
+                              "type": "string"
+                            },
+                            "PROMPTFOO_INSECURE_SSL": {
+                              "type": "string"
                             }
                           },
                           "additionalProperties": false
@@ -329,23 +338,16 @@
                             {
                               "type": "array",
                               "items": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "number"
-                                  },
-                                  {
-                                    "type": "boolean"
-                                  }
+                                "type": [
+                                  "string",
+                                  "number",
+                                  "boolean"
                                 ]
                               }
                             },
                             {
                               "type": "object",
-                              "properties": {},
-                              "additionalProperties": false
+                              "additionalProperties": {}
                             },
                             {
                               "type": "array"
@@ -426,10 +428,13 @@
                                               "cost",
                                               "equals",
                                               "factuality",
+                                              "g-eval",
+                                              "guardrails",
                                               "icontains-all",
                                               "icontains-any",
                                               "icontains",
                                               "is-json",
+                                              "is-refusal",
                                               "is-sql",
                                               "is-valid-openai-function-call",
                                               "is-valid-openai-tools-call",
@@ -495,6 +500,10 @@
                                 },
                                 "threshold": {
                                   "type": "number"
+                                },
+                                "config": {
+                                  "type": "object",
+                                  "additionalProperties": {}
                                 }
                               },
                               "required": [
@@ -878,13 +887,17 @@
                         "type": "string",
                         "enum": [
                           "ascii-smuggling",
+                          "beavertails",
                           "bfla",
+                          "bias",
                           "bola",
                           "competitors",
                           "contracts",
                           "cross-session-leak",
+                          "cyberseceval",
                           "debug-access",
                           "default",
+                          "divergent-repetition",
                           "excessive-agency",
                           "hallucination",
                           "harmful",
@@ -892,11 +905,13 @@
                           "harmful:child-exploitation",
                           "harmful:copyright-violations",
                           "harmful:cybercrime",
+                          "harmful:cybercrime:malicious-code",
                           "harmful:graphic-content",
                           "harmful:harassment-bullying",
                           "harmful:hate",
                           "harmful:illegal-activities",
                           "harmful:illegal-drugs",
+                          "harmful:illegal-drugs:meth",
                           "harmful:indiscriminate-weapons",
                           "harmful:insults",
                           "harmful:intellectual-property",
@@ -911,38 +926,29 @@
                           "harmful:specialized-advice",
                           "harmful:unsafe-practices",
                           "harmful:violent-crime",
+                          "harmful:weapons:ied",
                           "hijacking",
+                          "illegal-activity",
                           "imitation",
                           "indirect-prompt-injection",
                           "intent",
-                          "overreliance",
-                          "pii",
-                          "pii:api-db",
-                          "pii:direct",
-                          "pii:session",
-                          "pii:social",
-                          "policy",
-                          "politics",
-                          "prompt-extraction",
-                          "rbac",
-                          "religion",
-                          "shell-injection",
-                          "sql-injection",
-                          "ssrf",
+                          "misinformation",
                           "mitre:atlas",
-                          "nist:ai",
-                          "nist:ai:measure",
-                          "owasp:api",
-                          "owasp:llm",
                           "mitre:atlas:exfiltration",
                           "mitre:atlas:impact",
                           "mitre:atlas:initial-access",
                           "mitre:atlas:ml-attack-staging",
                           "mitre:atlas:reconnaissance",
                           "mitre:atlas:resource-development",
+                          "nist:ai",
+                          "nist:ai:measure",
                           "nist:ai:measure:1.1",
                           "nist:ai:measure:1.2",
                           "nist:ai:measure:2.1",
+                          "nist:ai:measure:2.10",
+                          "nist:ai:measure:2.11",
+                          "nist:ai:measure:2.12",
+                          "nist:ai:measure:2.13",
                           "nist:ai:measure:2.2",
                           "nist:ai:measure:2.3",
                           "nist:ai:measure:2.4",
@@ -951,16 +957,14 @@
                           "nist:ai:measure:2.7",
                           "nist:ai:measure:2.8",
                           "nist:ai:measure:2.9",
-                          "nist:ai:measure:2.10",
-                          "nist:ai:measure:2.11",
-                          "nist:ai:measure:2.12",
-                          "nist:ai:measure:2.13",
                           "nist:ai:measure:3.1",
                           "nist:ai:measure:3.2",
                           "nist:ai:measure:3.3",
                           "nist:ai:measure:4.1",
                           "nist:ai:measure:4.2",
                           "nist:ai:measure:4.3",
+                          "overreliance",
+                          "owasp:api",
                           "owasp:api:01",
                           "owasp:api:02",
                           "owasp:api:03",
@@ -971,6 +975,7 @@
                           "owasp:api:08",
                           "owasp:api:09",
                           "owasp:api:10",
+                          "owasp:llm",
                           "owasp:llm:01",
                           "owasp:llm:02",
                           "owasp:llm:03",
@@ -980,7 +985,24 @@
                           "owasp:llm:07",
                           "owasp:llm:08",
                           "owasp:llm:09",
-                          "owasp:llm:10"
+                          "owasp:llm:10",
+                          "personal-safety",
+                          "pii",
+                          "pii:api-db",
+                          "pii:direct",
+                          "pii:session",
+                          "pii:social",
+                          "pliny",
+                          "policy",
+                          "politics",
+                          "prompt-extraction",
+                          "rbac",
+                          "religion",
+                          "shell-injection",
+                          "sql-injection",
+                          "ssrf",
+                          "system-prompt-override",
+                          "toxicity"
                         ]
                       },
                       {
@@ -999,13 +1021,17 @@
                             "type": "string",
                             "enum": [
                               "ascii-smuggling",
+                              "beavertails",
                               "bfla",
+                              "bias",
                               "bola",
                               "competitors",
                               "contracts",
                               "cross-session-leak",
+                              "cyberseceval",
                               "debug-access",
                               "default",
+                              "divergent-repetition",
                               "excessive-agency",
                               "hallucination",
                               "harmful",
@@ -1013,11 +1039,13 @@
                               "harmful:child-exploitation",
                               "harmful:copyright-violations",
                               "harmful:cybercrime",
+                              "harmful:cybercrime:malicious-code",
                               "harmful:graphic-content",
                               "harmful:harassment-bullying",
                               "harmful:hate",
                               "harmful:illegal-activities",
                               "harmful:illegal-drugs",
+                              "harmful:illegal-drugs:meth",
                               "harmful:indiscriminate-weapons",
                               "harmful:insults",
                               "harmful:intellectual-property",
@@ -1032,38 +1060,29 @@
                               "harmful:specialized-advice",
                               "harmful:unsafe-practices",
                               "harmful:violent-crime",
+                              "harmful:weapons:ied",
                               "hijacking",
+                              "illegal-activity",
                               "imitation",
                               "indirect-prompt-injection",
                               "intent",
-                              "overreliance",
-                              "pii",
-                              "pii:api-db",
-                              "pii:direct",
-                              "pii:session",
-                              "pii:social",
-                              "policy",
-                              "politics",
-                              "prompt-extraction",
-                              "rbac",
-                              "religion",
-                              "shell-injection",
-                              "sql-injection",
-                              "ssrf",
+                              "misinformation",
                               "mitre:atlas",
-                              "nist:ai",
-                              "nist:ai:measure",
-                              "owasp:api",
-                              "owasp:llm",
                               "mitre:atlas:exfiltration",
                               "mitre:atlas:impact",
                               "mitre:atlas:initial-access",
                               "mitre:atlas:ml-attack-staging",
                               "mitre:atlas:reconnaissance",
                               "mitre:atlas:resource-development",
+                              "nist:ai",
+                              "nist:ai:measure",
                               "nist:ai:measure:1.1",
                               "nist:ai:measure:1.2",
                               "nist:ai:measure:2.1",
+                              "nist:ai:measure:2.10",
+                              "nist:ai:measure:2.11",
+                              "nist:ai:measure:2.12",
+                              "nist:ai:measure:2.13",
                               "nist:ai:measure:2.2",
                               "nist:ai:measure:2.3",
                               "nist:ai:measure:2.4",
@@ -1072,16 +1091,14 @@
                               "nist:ai:measure:2.7",
                               "nist:ai:measure:2.8",
                               "nist:ai:measure:2.9",
-                              "nist:ai:measure:2.10",
-                              "nist:ai:measure:2.11",
-                              "nist:ai:measure:2.12",
-                              "nist:ai:measure:2.13",
                               "nist:ai:measure:3.1",
                               "nist:ai:measure:3.2",
                               "nist:ai:measure:3.3",
                               "nist:ai:measure:4.1",
                               "nist:ai:measure:4.2",
                               "nist:ai:measure:4.3",
+                              "overreliance",
+                              "owasp:api",
                               "owasp:api:01",
                               "owasp:api:02",
                               "owasp:api:03",
@@ -1092,6 +1109,7 @@
                               "owasp:api:08",
                               "owasp:api:09",
                               "owasp:api:10",
+                              "owasp:llm",
                               "owasp:llm:01",
                               "owasp:llm:02",
                               "owasp:llm:03",
@@ -1101,7 +1119,24 @@
                               "owasp:llm:07",
                               "owasp:llm:08",
                               "owasp:llm:09",
-                              "owasp:llm:10"
+                              "owasp:llm:10",
+                              "personal-safety",
+                              "pii",
+                              "pii:api-db",
+                              "pii:direct",
+                              "pii:session",
+                              "pii:social",
+                              "pliny",
+                              "policy",
+                              "politics",
+                              "prompt-extraction",
+                              "rbac",
+                              "religion",
+                              "shell-injection",
+                              "sql-injection",
+                              "ssrf",
+                              "system-prompt-override",
+                              "toxicity"
                             ]
                           },
                           {
@@ -1144,21 +1179,23 @@
                       {
                         "type": "string",
                         "enum": [
-                          "basic",
                           "default",
+                          "basic",
                           "jailbreak",
                           "jailbreak:composite",
                           "prompt-injection",
-                          "ascii-smuggling",
                           "base64",
                           "citation",
                           "crescendo",
+                          "gcg",
                           "goat",
                           "jailbreak:tree",
+                          "jailbreak:likert",
                           "leetspeak",
                           "math-prompt",
                           "multilingual",
-                          "rot13"
+                          "rot13",
+                          "best-of-n"
                         ]
                       },
                       {
@@ -1186,7 +1223,7 @@
                   }
                 ]
               },
-              "description": "Strategies to use for redteam generation.\n\nDefaults to jailbreak, jailbreak:composite\nSupports basic, default, jailbreak, jailbreak:composite, prompt-injection, ascii-smuggling, base64, citation, crescendo, goat, jailbreak:tree, leetspeak, math-prompt, multilingual, rot13",
+              "description": "Strategies to use for redteam generation.\n\nDefaults to basic, jailbreak, jailbreak:composite\nSupports default, basic, jailbreak, jailbreak:composite, prompt-injection, base64, citation, crescendo, gcg, goat, jailbreak:tree, jailbreak:likert, leetspeak, math-prompt, multilingual, rot13, best-of-n",
               "default": [
                 "default"
               ]
@@ -1198,7 +1235,7 @@
             },
             "delay": {
               "type": "integer",
-              "exclusiveMinimum": 0,
+              "minimum": 0,
               "description": "Delay in milliseconds between plugin API calls"
             }
           },
@@ -1327,15 +1364,18 @@
               "type": "integer",
               "exclusiveMinimum": 0
             },
-            "filterSample": {
-              "type": "integer",
-              "exclusiveMinimum": 0
+            "filterMetadata": {
+              "type": "string"
             },
             "filterPattern": {
               "type": "string"
             },
             "filterProviders": {
               "type": "string"
+            },
+            "filterSample": {
+              "type": "integer",
+              "exclusiveMinimum": 0
             },
             "filterTargets": {
               "type": "string"

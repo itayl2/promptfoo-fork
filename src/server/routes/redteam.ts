@@ -26,7 +26,7 @@ redteamRouter.post('/run', async (req: Request, res: Response): Promise<void> =>
     }
   }
 
-  const { config, force, verbose } = req.body;
+  const { config, force, verbose, delay } = req.body;
   const id = uuidv4();
   currentJobId = id;
   currentAbortController = new AbortController();
@@ -49,6 +49,7 @@ redteamRouter.post('/run', async (req: Request, res: Response): Promise<void> =>
     liveRedteamConfig: config,
     force,
     verbose,
+    delay: Number(delay || '0'),
     logCallback: (message: string) => {
       if (currentJobId === id) {
         const job = evalJobs.get(id);
@@ -123,11 +124,13 @@ redteamRouter.post('/cancel', async (req: Request, res: Response): Promise<void>
 redteamRouter.post('/:task', async (req: Request, res: Response): Promise<void> => {
   const { task } = req.params;
   const cloudFunctionUrl = getRemoteGenerationUrl();
-  logger.debug(`Received ${task} task request:`, {
-    method: req.method,
-    url: req.url,
-    body: req.body,
-  });
+  logger.debug(
+    `Received ${task} task request: ${JSON.stringify({
+      method: req.method,
+      url: req.url,
+      body: req.body,
+    })}`,
+  );
 
   try {
     logger.debug(`Sending request to cloud function: ${cloudFunctionUrl}`);
@@ -148,10 +151,10 @@ redteamRouter.post('/:task', async (req: Request, res: Response): Promise<void> 
     }
 
     const data = await response.json();
-    logger.debug(`Received response from cloud function:`, data);
+    logger.debug(`Received response from cloud function: ${JSON.stringify(data)}`);
     res.json(data);
   } catch (error) {
-    logger.error(`Error in ${task} task:`, error);
+    logger.error(`Error in ${task} task: ${error}`);
     res.status(500).json({ error: `Failed to process ${task} task` });
   }
 });

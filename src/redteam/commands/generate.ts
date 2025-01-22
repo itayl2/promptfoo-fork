@@ -100,6 +100,8 @@ export async function doGenerateRedteam(
     name: 'generate redteam - started',
     numPrompts: testSuite.prompts.length,
     numTestsExisting: (testSuite.tests || []).length,
+    plugins: redteamConfig?.plugins?.map((p) => (typeof p === 'string' ? p : p.id)) || [],
+    strategies: redteamConfig?.strategies?.map((s) => (typeof s === 'string' ? s : s.id)) || [],
   });
   await telemetry.send();
 
@@ -162,7 +164,7 @@ export async function doGenerateRedteam(
     logger.debug(`strategies: ${strategyObjs.map((s) => s.id ?? s).join(', ')}`);
   } catch (error) {
     logger.error('Error logging plugins and strategies. One did not have a valid id.');
-    logger.error(error);
+    logger.error(`Error details: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const config = {
@@ -170,11 +172,13 @@ export async function doGenerateRedteam(
     language: redteamConfig?.language || options.language,
     maxConcurrency: options.maxConcurrency,
     numTests: redteamConfig?.numTests ?? options.numTests,
+    entities: redteamConfig?.entities,
     plugins,
     provider: redteamConfig?.provider || options.provider,
     purpose: redteamConfig?.purpose || options.purpose,
     strategies: strategyObjs,
     delay: redteamConfig?.delay || options.delay,
+    sharing: redteamConfig?.sharing || options.sharing,
   };
   const parsedConfig = RedteamConfigSchema.safeParse(config);
   if (!parsedConfig.success) {
@@ -207,6 +211,7 @@ export async function doGenerateRedteam(
     entities,
     strategies: strategyObjs || [],
     plugins: plugins || [],
+    sharing: config.sharing,
   };
 
   let ret: Partial<UnifiedConfig> | undefined;
@@ -286,6 +291,8 @@ export async function doGenerateRedteam(
     numPrompts: testSuite.prompts.length,
     numTestsExisting: (testSuite.tests || []).length,
     numTestsGenerated: redteamTests.length,
+    plugins: plugins.map((p) => p.id),
+    strategies: strategies.map((s) => (typeof s === 'string' ? s : s.id)),
   });
   await telemetry.send();
   return ret;
@@ -412,7 +419,9 @@ export function redteamGenerateCommand(
             logger.error(`  ${err.path.join('.')}: ${err.message}`);
           });
         } else {
-          logger.error('An unexpected error occurred:', error);
+          logger.error(
+            `An unexpected error occurred: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
         process.exit(1);
       }
